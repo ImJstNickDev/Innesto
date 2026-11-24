@@ -3,7 +3,7 @@ site_description: Documentation for the native Openworld mod loader and API proj
 site_url: https://imjstnickdev.github.io/Innesto/
 repo_url: https://github.com/ImJstNickDev/Innesto
 repo_name: Innesto on GitHub
-edit_uri: edit/main/docs/
+edit_uri: ""
 theme:
   name: mkdocs
   locale: en
@@ -13,6 +13,8 @@ nav:
   - Innesto: index.md
   - Development: development.md
   - API conventions: api-conventions.md
+not_in_nav: |
+  /native-initialization.md
 validation:
   nav:
     omitted_files: warn
