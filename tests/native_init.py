@@ -110,7 +110,7 @@ class NativeInitialization(unittest.TestCase):
         mod = self.work / os.fsdecode(b"context \n:\xff.so")
         subprocess.run([CC, "-shared", "-fPIC", "-I", ROOT / "include",
                         ROOT / "tests/launch_context.c", "-o", mod], check=True)
-        header = b"Innesto/2\0server\0"
+        header = b"Innesto/3\0server\0" + self.profile["sha256"].encode() + b"\0"
         record = header + b"1\0\0"
         payload = record + os.fsencode(mod)
         child = """\
@@ -125,7 +125,7 @@ os.execl(host, host)
         for handoff, valid in [(payload + b"\0", True), (payload, False), (record + b"relative\0", False),
                                (header + b"2\0\0", False), (header + b"1\0", False),
                                (header + b"1\0-typo\0", False), (header + b"3\0", False),
-                               (b"Innesto/2\0shared\0", False), (b"Innesto/other\0", False)]:
+                               (b"Innesto/3\0shared\0", False), (b"Innesto/3\0client\0bad\0", False), (b"Innesto/other\0", False)]:
             with self.subTest(valid=valid, terminated=handoff.endswith(b"\0")):
                 with (BUILD / "innesto-bootstrap.so").open("rb") as loader, \
                         tempfile.TemporaryFile(dir=self.work) as plan:

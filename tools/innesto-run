@@ -100,9 +100,10 @@ def validate_mod_path(path):
 
 
 @contextmanager
-def mod_list(environment, mods):
+def mod_list(environment, verified_digest, mods):
     with os.fdopen(os.memfd_create("innesto-mod-list", os.MFD_CLOEXEC), "wb") as plan:
-        plan.write(b"Innesto/2\0" + environment.encode("ascii") + b"\0")
+        plan.write(b"Innesto/3\0" + environment.encode("ascii") + b"\0")
+        plan.write(verified_digest.encode("ascii") + b"\0")
         for mod in mods:
             plan.write(str(mod.api).encode("ascii") + b"\0" + mod.mod_id.encode("ascii") + b"\0")
             plan.write(os.fsencode(mod.library) + b"\0")
@@ -124,7 +125,8 @@ def run(args):
         mode = os.fstat(target.fileno()).st_mode
         if mode & (stat.S_ISUID | stat.S_ISGID) or "security.capability" in os.listxattr(target.fileno()):
             raise ValueError("unsupported target privilege mode")
-        if hashlib.file_digest(target, "sha256").hexdigest() != expected_digest:
+        verified_digest = hashlib.file_digest(target, "sha256").hexdigest()
+        if verified_digest != expected_digest:
             raise ValueError("unsupported target fingerprint")
 
         if args.mods_dir is not None:
@@ -147,7 +149,7 @@ def run(args):
             # Always use a nonstandard descriptor, including for daemon launches
             # with one or more of stdin, stdout and stderr closed.
             fd = fcntl.fcntl(loader.fileno(), fcntl.F_DUPFD_CLOEXEC, 3)
-            with os.fdopen(fd, "rb") as inherited, mod_list(environment, mods) as plan:
+            with os.fdopen(fd, "rb") as inherited, mod_list(environment, verified_digest, mods) as plan:
                 launch_target(target, executable, inherited, plan, args.target_args)
 
 

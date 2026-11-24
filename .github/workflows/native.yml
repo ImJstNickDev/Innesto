@@ -18,7 +18,10 @@ jobs:
           persist-credentials: false
           fetch-depth: 2
       - name: Configure
-        run: cmake -S . -B build/native -DCMAKE_C_FLAGS="-Wall -Wextra -Werror -pedantic"
+        run: >-
+          cmake -S . -B build/native -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
+          -DCMAKE_C_FLAGS="-Wall -Wextra -Werror -pedantic"
       - name: Build
         run: cmake --build build/native --parallel
       - name: Exercise the example and target checks

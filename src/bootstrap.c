@@ -1,6 +1,8 @@
 #define _GNU_SOURCE
 
 #include "runtime.h"
+#include "block_break_adapter.h"
+#include "adapters/a1_2_10/simulation.h"
 
 #include <dlfcn.h>
 #include <limits.h>
@@ -97,7 +99,7 @@ static struct mod *consume_launch_context(void)
         startup_error("could not open mod list descriptor");
     }
     char *format = plan_field(paths, 0);
-    if (strcmp(format, "Innesto/2") != 0) {
+    if (strcmp(format, "Innesto/3") != 0) {
         startup_error("unknown mod plan format");
     }
     free(format);
@@ -110,7 +112,10 @@ static struct mod *consume_launch_context(void)
     } else {
         startup_error("invalid physical environment in mod plan");
     }
-    free(side);
+    char *digest = plan_field(paths, 0);
+    if (strlen(digest) != 64 || strspn(digest, "0123456789abcdef") != 64) {
+        startup_error("invalid executable identity in mod plan");
+    }
 
     struct mod *mods = NULL;
     struct mod **tail = &mods;
@@ -152,6 +157,10 @@ static struct mod *consume_launch_context(void)
     if (fclose(paths) != 0) {
         startup_error("could not close mod list descriptor");
     }
+    const struct innesto_native_identity identity = {"a1.2.10", "linux-x86_64", side, digest};
+    innesto_a1_2_10_activate(&identity, environment);
+    free(side);
+    free(digest);
     return mods;
 }
 
@@ -196,15 +205,18 @@ __attribute__((constructor)) static void initialize_mods(void)
     char current_pid[32];
     snprintf(current_pid, sizeof current_pid, "%ld", (long)getpid());
     if (!launch_pid || strcmp(launch_pid, current_pid) != 0) {
+        innesto_block_break_bypass();
         return;
     }
 
     static struct mod *mods;  // Contexts passed to v2 mods live until process exit.
     mods = consume_launch_context();
+    innesto_block_break_seal_adapter();
     innesto_seal_capabilities();
     for (struct mod *entry = mods; entry; entry = entry->next) {
         resolve_entrypoint(entry);
     }
+    innesto_block_break_open_registration();
     for (struct mod *entry = mods; entry; entry = entry->next) {
         int result = entry->api == 1 ? entry->initialize.v1() :
             innesto_initialize_v2(&entry->context, entry->initialize.v2);
@@ -214,5 +226,6 @@ __attribute__((constructor)) static void initialize_mods(void)
             _Exit(EXIT_FAILURE);
         }
     }
+    innesto_block_break_finish_registration();
     innesto_finish_startup();
 }
