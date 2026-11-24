@@ -5,6 +5,16 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 
+def protected(world, registry):
+    if os.path.lexists(world / registry):
+        return True
+    try:
+        with os.scandir(world) as entries:
+            return any(e.name.startswith((registry + ".backup-", registry + ".pending-")) for e in entries)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+
+
 def opens_dedicated_world(arguments):
     # Recognize command modes in command position. A value supplied to an
     # option such as --name or --motd is not a utility command.
@@ -47,7 +57,7 @@ def server_world(arguments, active, registry):
         raise ValueError("supply --data-dir for terrain with a separate server instance or config directory")
     if not active:
         for path in paths:
-            if os.path.lexists(path / registry):
+            if protected(path, registry):
                 return path
     return paths[0]
 
@@ -76,7 +86,7 @@ def world_for_launch(arguments, active, registry):
             roots = [Path(operand)]
             if mode == "--verify-world" and arguments.index(mode) + 2 < len(arguments):
                 roots.append(Path(arguments[arguments.index(mode) + 2]))
-            if active or any(os.path.lexists(root / entry / registry)
+            if active or any(protected(root / entry, registry)
                                 for root in roots for entry in (".", "cache")):
                 raise ValueError("terrain registration requires a normal dedicated server")
     return server_world(arguments, active, registry)

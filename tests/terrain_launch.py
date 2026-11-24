@@ -101,12 +101,12 @@ int main(int argc, char **argv) {
         (cls.pack / "blocks").mkdir(parents=True)
         (cls.pack / "pack.txt").write_text("resolution 32\ntile ow_fixture 1.000000 0 roche\n")
         cls.packages = cls.base / "mods"
-        for name in ("copperfield", "tidepool", "reedbed"):
+        for name in ("copperfield", "tidepool", "reedbed", "aster"):
             out = cls.base / ("build-" + name)
             subprocess.run(["cmake", "-S", ROOT / "examples" / name, "-B", out,
                             "-DINNESTO_INCLUDE_DIR=" + str(ROOT / "include")], check=True, stdout=subprocess.PIPE)
             subprocess.run(["cmake", "--build", out], check=True, stdout=subprocess.PIPE)
-            prefix = cls.base / "v2-packages" if name == "reedbed" else cls.packages
+            prefix = cls.base / "v2-packages" if name in ("reedbed", "aster") else cls.packages
             subprocess.run(["cmake", "--install", out, "--prefix", prefix], check=True, stdout=subprocess.PIPE)
         shutil.copyfile(cls.packages / "copperfield/assets/ochre.png", cls.pack / "blocks/ow_fixture.png")
 
@@ -236,6 +236,14 @@ int main(int argc, char **argv) {
                     return subprocess.run([*args, *extra], cwd=self.instance, capture_output=True,
                                           text=True, timeout=10, env={**os.environ, "XDG_CACHE_HOME": str(self.instance / "cache")})
                 self.assert_loaded(invoke())
+                # A server which installed Copperfield second has a different
+                # but valid layout. The native client's staged descriptor must match it.
+                rows[1]["id"], rows[2]["id"] = rows[2]["id"], rows[1]["id"]
+                catalogue.write_text(json.dumps({"materials": rows}))
+                reordered = invoke()
+                self.assertEqual(reordered.returncode, 0, reordered.stderr)
+                keys = [row.split()[0] for row in reordered.stdout.splitlines()[3:]]
+                self.assertEqual(keys, ["ow_" + rows[i]["key"] for i in (2, 1)])
                 path = self.mods / "copperfield/innesto.mod.json"
                 original = path.read_text()
                 manifest = json.loads(original)
@@ -250,6 +258,63 @@ int main(int argc, char **argv) {
             finally:
                 server.shutdown()
                 thread.join()
+
+    def test_migration_through_launcher_reopens_with_an_earlier_id_at_the_end(self):
+        args = ("--data-dir", str(self.world))
+        self.assert_loaded(self.launch(*args))
+        path = self.world / "innesto-terrain-v1.json"
+        record = json.loads(path.read_bytes())
+        bindings = record["materials"]
+        # Recreate the byte format emitted by the public schema 1 writer.
+        record["schema"] = 1
+        record["materials"] = [[b["id"], b["receipt"]] for b in bindings]
+        legacy = (json.dumps(record, sort_keys=True, indent=2) + "\n").encode()
+        path.write_bytes(legacy)
+        terrain_save = self.world / "populated-fixture"
+        terrain_save.write_bytes(b"existing terrain and inventory")
+        self.assert_loaded(self.launch(*args))
+        self.assertEqual(path.read_bytes(), legacy)
+        shutil.copytree(self.base / "v2-packages/aster", self.mods / "aster")
+        self.assert_refused(self.launch(*args))
+
+        def migrate(*game_args):
+            cmd = self.command(*game_args)
+            cmd.insert(cmd.index("--"), "--migrate-terrain")
+            return subprocess.run(cmd, cwd=self.instance, env={**os.environ, "XDG_CACHE_HOME": str(self.instance / "cache")},
+                                  capture_output=True, text=True, timeout=20)
+
+        self.assert_refused(migrate(*args, "--help"))
+        self.assertEqual(path.read_bytes(), legacy)
+        result = migrate(*args)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("initialized", result.stderr)
+        self.assertNotIn("started ", result.stdout)
+        self.assertEqual(json.loads(path.read_bytes())["materials"][:2], bindings)
+        stored = json.loads(path.read_text())["materials"]
+        self.assertEqual([(b["id"], b["slot"]) for b in stored],
+                         [("copperfield:ochre", 1), ("tidepool:lagoon", 2), ("aster:chalk", 3)])
+        self.assertEqual((self.world / (path.name + ".backup-" + hashlib.sha256(legacy).hexdigest())).read_bytes(),
+                         legacy)
+        reopened = self.launch(*args)
+        self.assertEqual(reopened.returncode, 0, reopened.stderr)
+        observed = [row.split()[0] for row in reopened.stdout.splitlines()[3:]]
+        self.assertEqual(observed, ["ow_" + game_key(b["id"]) for b in stored])
+        # The actual visual update is opt-in; a stale client still has a different receipt.
+        shutil.copyfile(self.mods / "aster/assets/chalk.png", self.mods / "copperfield/assets/ochre.png")
+        self.assert_refused(self.launch(*args))
+        self.assertEqual(migrate(*args).returncode, 0)
+        updated = json.loads(path.read_text())["materials"]
+        self.assertEqual(updated[0]["slot"], bindings[0]["slot"])
+        self.assertEqual(updated[0]["revision"], 2)
+        self.assertNotEqual(updated[0]["receipt"], bindings[0]["receipt"])
+        self.assertEqual(updated[1:], stored[1:])
+        self.assertEqual(self.launch(*args).returncode, 0)
+        enabled = self.mods / "aster"
+        enabled.rename(self.instance / "disabled-aster")
+        previous = {p.name: p.read_bytes() for p in self.world.iterdir()}
+        self.assert_refused(migrate(*args))
+        self.assertEqual({p.name: p.read_bytes() for p in self.world.iterdir()}, previous)
+        self.assertEqual(terrain_save.read_bytes(), b"existing terrain and inventory")
 
     def test_nonempty_world_without_registry(self):
         self.world.mkdir()
@@ -339,6 +404,12 @@ int main(int argc, char **argv) {
             started = process.stdout.readline()
             self.assertRegex(started, r"^started [0-9]+\n$")
             self.assertNotEqual(process.pid, int(started.split()[1]))
+            offline = self.command(*args)
+            offline.insert(offline.index("--"), "--migrate-terrain")
+            result = subprocess.run(offline, cwd=self.instance, env={**env, "INNESTO_TEST_HOLD": ""},
+                                    capture_output=True, text=True, timeout=10)
+            self.assert_refused(result)
+            self.assertIn("holds this terrain world", result.stderr)
             self.assert_refused(self.launch(*args))
             process.kill()
             process.wait(timeout=5)
@@ -346,6 +417,19 @@ int main(int argc, char **argv) {
         finally:
             process.communicate(input="\n", timeout=10)
         self.assert_loaded(self.launch(*args))
+
+    def test_orphaned_migration_files_protect_a_world_without_its_packages(self):
+        self.world.mkdir()
+        self.mods = self.instance / "empty-mods"
+        self.mods.mkdir()
+        del self.settings["terrainPackSha256"], self.settings["terrainBaseCount"]
+        for suffix in ("backup-", "pending-"):
+            marker = self.world / ("innesto-terrain-v1.json." + suffix + "1" * 64)
+            marker.write_bytes(b"do not overwrite")
+            for args in (("--data-dir", str(self.world)), ("--solo", str(self.world))):
+                self.assert_refused(self.launch(*args))
+            self.assertEqual(marker.read_bytes(), b"do not overwrite")
+            marker.unlink()
 
     def test_default_world_lease_precedes_first_package_free_start(self):
         installed, profile = self.mods, self.settings.copy()

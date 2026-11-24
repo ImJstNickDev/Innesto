@@ -63,6 +63,11 @@ class TerrainAdapterTests(unittest.TestCase):
             pin = terrain.stock_fingerprint(self.stock)
         return terrain.stage_pack(self.stock, self.dest, materials, pin)
 
+    def test_last_representable_slot(self):
+        terrain.check_slot_count(430, 65536 - 430)
+        with self.assertRaisesRegex(ValueError, "slot"):
+            terrain.check_slot_count(430, 65537 - 430)
+
     def test_operator_names_are_flat_and_preserve_component_boundaries(self):
         ids = ["a:b_c", "a_b:c", "a:b-c", "a:b_uc", "a:b_hc", "ab:c", "a:bc"]
         keys = [terrain.game_key(mid) for mid in ids]
@@ -143,6 +148,61 @@ class TerrainAdapterTests(unittest.TestCase):
             digests.append(terrain.stage_pack(self.stock, dest, [item], stock)[key])
             self.assertEqual((dest / "pack.txt").read_text().splitlines()[-1].split()[3], str(int(bool(frames))))
         self.assertEqual(len(set(digests)), len(digests))
+
+    def test_registry_separates_family_from_verified_visual_revisions(self):
+        pin = terrain.stock_fingerprint(self.stock)
+        key = "garden:mint"
+        opaque = Material(key, self.image)
+        def definitions(index, material):
+            return terrain.stage_materials(self.stock, self.root / f"definition-{index}", [material], pin)[key]
+        first = definitions(1, opaque)
+        self.image.write_bytes(png())
+        second = definitions(2, opaque)
+        self.assertEqual(first["gameplay"], second["gameplay"])
+        self.assertEqual(first["visualPolicy"], second["visualPolicy"])
+        self.assertNotEqual(first["visual"], second["visual"])
+        self.assertNotEqual(first["receipt"], second["receipt"])
+        plant = definitions(3, Material(key, self.image, family="plant"))
+        self.assertNotEqual(second["gameplay"], plant["gameplay"])
+        self.assertEqual(second["visual"], plant["visual"])
+        for n, trait in enumerate(({"family": "glass"}, {"tile_meters": 0.5},
+                                   {"display_names": {"it": "Menta"}}, {"frames": (self.image,)})):
+            self.assertNotEqual(definitions(4+n, Material(key, self.image, **trait))["visualPolicy"],
+                                second["visualPolicy"])
+        self.image.write_bytes(png(rows=ROWS[:-1] + bytes([254])))
+        transparent = definitions(9, opaque)
+        self.assertNotEqual(transparent["visualPolicy"], second["visualPolicy"])
+        self.image.write_bytes(png(rows=ROWS.replace(b"I", b"L")[:-1] + bytes([254])))
+        self.assertNotEqual(transparent["visualPolicy"], definitions(10, opaque)["visualPolicy"])
+
+    def test_legacy_family_proof_requires_exact_image_and_original_fields(self):
+        stock = terrain.stock_fingerprint(self.stock)
+        key = "garden:mint"
+        image = self.image.read_bytes()
+        old = hashlib.sha256(b"Innesto terrain receipt v2\0" + bytes.fromhex(stock)
+                             + b"0.500000 0 plante").hexdigest().encode()
+        expected = hashlib.sha256(image[:-12] + chunk(b"tEXt", b"Innesto\0" + old) + image[-12:]).hexdigest()
+        original = Material(key, self.image, family="plant", tile_meters=0.5)
+        for i, changes in enumerate(({}, {"display_names": {"it": "Menta"}}, {"frames": (self.image,)})):
+            proofs = {}
+            for field, value in changes.items():
+                setattr(original, field, value)
+            result = terrain.stage_materials(self.stock, self.root / f"legacy-{i}", [original], stock,
+                                             legacy_receipts=proofs)
+            self.assertEqual(proofs, {} if changes else {key: expected})
+            self.assertNotEqual(result[key]["receipt"], expected)
+            original.display_names, original.frames = {}, ()
+
+    def test_opacity_reads_each_png_alpha_filter(self):
+        # Independent fixtures for a row of opaque alpha preceded by opaque rows.
+        first_pair = [(255,255), (255,0), (255,255), (255,128), (255,0)]
+        later_pair = [(255,255), (255,0), (0,0), (128,0), (0,0)]
+        for kind in range(5):
+            def row(pair):
+                return bytes([kind]) + b"".join(bytes([22, 33, 44, a]) for a in [pair[0]] + [pair[1]] * 31)
+            rows = row(first_pair[kind]) + row(later_pair[kind]) * 31
+            self.assertTrue(terrain._opaque(rows))
+            self.assertFalse(terrain._opaque(rows[:-1] + bytes([(rows[-1] - 1) % 256])))
 
     def test_stock_pin_covers_names_bytes_and_empty_directories(self):
         fingerprint = terrain.stock_fingerprint(self.stock)

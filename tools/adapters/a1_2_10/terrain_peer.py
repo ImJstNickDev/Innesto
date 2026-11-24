@@ -5,7 +5,7 @@ from http.client import HTTPConnection, HTTPException
 import json
 
 from innesto_packages import unique_keys
-from .terrain import game_key, MAX_PNG_BYTES, PREFIX
+from .terrain import check_slot_count, game_key, MAX_CATALOGUE_SIZE, MAX_PNG_BYTES, PREFIX
 
 
 TIMEOUT = 5
@@ -31,14 +31,14 @@ def _fetch(host, port, path, limit):
         connection.close()
 
 
-def _catalogue(host, port):
-    body = _fetch(host, port, "/api/info?planet=earth", CATALOGUE_LIMIT)
+def _catalogue(host, port, limit=CATALOGUE_LIMIT):
+    body = _fetch(host, port, "/api/info?planet=earth", limit)
     try:
         catalogue = json.loads(body, object_pairs_hook=unique_keys)
     except (ValueError, RecursionError) as exc:
         raise ValueError("invalid terrain peer catalogue JSON") from exc
     rows = catalogue.get("materials") if isinstance(catalogue, dict) else None
-    if not isinstance(rows, list) or not rows:
+    if not isinstance(rows, list) or not 1 <= len(rows) <= MAX_CATALOGUE_SIZE:
         raise ValueError("invalid terrain peer material catalogue")
 
     ids = set()
@@ -70,20 +70,36 @@ def stock_count(host: str, port: int) -> int:
     return count
 
 
-def verify_peer(host: str, port: int, materials: dict[str, str], base_count: int) -> None:
-    """Require pinned stock slots, exact assigned IDs and matching texture receipts."""
+def peer_order(host: str, port: int, material_ids, base_count: int) -> list[str]:
+    """Resolve our own IDs into this world's contiguous native slots."""
     if type(base_count) is not int or base_count < 1:
         raise ValueError("invalid terrain peer stock material count")
-    count, reported = _catalogue(host, port)
-    expected = {game_key(mid): digest for mid, digest in materials.items()}
-    if count != base_count + len(expected) or reported.keys() != expected.keys():
+    by_key = {game_key(mid): mid for mid in material_ids}
+    check_slot_count(base_count, len(by_key))
+    # Rows include keys, derived labels and paths. Size the response budget from
+    # locally installed IDs so a legitimate large pack can pass preflight.
+    limit = CATALOGUE_LIMIT + sum(1024 + 4 * len(key) for key in by_key)
+    count, reported = _catalogue(host, port, limit)
+    if count != base_count + len(by_key) or reported.keys() != by_key.keys():
         raise ValueError("terrain peer catalogue differs from the pinned material set")
-    for index, key in enumerate(expected, base_count):
-        if reported.get(key) != index:
-            raise ValueError("terrain peer material IDs differ from the local registry")
-    for key, digest in expected.items():
+    ordered = sorted(reported, key=reported.__getitem__)
+    if any(reported[key] != index for index, key in enumerate(ordered, base_count)):
+        raise ValueError("terrain peer material IDs overlap the pinned stock slots")
+    return [by_key[key] for key in ordered]
+
+
+def verify_peer(host: str, port: int, materials: dict[str, str], base_count: int, *, initial_order=None) -> None:
+    """Recheck the staged order and served texture receipts immediately before launch."""
+    if initial_order is None:
+        initial_order = peer_order(host, port, materials, base_count)
+    if initial_order != list(materials):
+        raise ValueError("terrain peer material IDs differ from the local registry")
+    for mid, digest in materials.items():
+        key = game_key(mid)
         # The staged receipt is a single small ancillary chunk added to a
         # package PNG. The digest covers both the original bytes and the receipt.
         image = _fetch(host, port, f"/pack/ow_{key}.png", MAX_PNG_BYTES + 128)
         if hashlib.sha256(image).hexdigest() != digest:
             raise ValueError(f"terrain peer texture mismatch for {key!r}")
+    if peer_order(host, port, materials, base_count) != initial_order:
+        raise ValueError("terrain peer material IDs changed during preflight")
