@@ -12,6 +12,7 @@ in dependency order before the host enters `main`.
 - [Replace a missing terrain package](missing-terrain.md) covers explicit aliases, migration previews, full backups and recovery.
 - [Use the terrain examples in Survival](terrain-survival.md) covers harvesting, placement, the stone chisel recipe and what persists across restarts.
 - [Saved block totals](saved-block-totals.md) lets server mods read persisted player progress.
+- [Research catalogue](research-catalog.md) covers build-scoped evidence, missing interfaces and reviewed exports.
 - [Native mappings](native-mappings.md) describes exact-build function and type resolution, typed decision hooks, and the original stripped fixtures.
 
 ## Verified behavior

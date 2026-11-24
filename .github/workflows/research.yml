@@ -1,0 +1,43 @@
+name: Native research fixtures
+
+on:
+  pull_request:
+    branches: ['game/a1.2.10']
+    paths:
+      - 'tools/research/ghidra/**'
+      - 'tools/research/matching/**'
+      - '.github/workflows/research.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ghidra:
+    name: Check scoped analysis and cross-build matching
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Set up Ghidra and the bundled PyGhidra distribution
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl --fail --location --silent --show-error --retry 3 -o ghidra.zip \
+            https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.2_build/ghidra_12.2_PUBLIC_20261016.zip
+          echo '2c2cd776db3c1f6a097ba418922378ac3649cadd5e844a6f5f088ae628a7be67  ghidra.zip' | sha256sum --check
+          unzip -q ghidra.zip
+          install_dir="$RUNNER_TEMP/ghidra_12.2_PUBLIC"
+          echo "GHIDRA_INSTALL_DIR=$install_dir" >> "$GITHUB_ENV"
+          python3 -m venv analyzer
+          analyzer/bin/pip install --no-index --find-links "$install_dir/Ghidra/Features/PyGhidra/pypkg/dist" pyghidra
+      - name: Inspect independently built original fixtures
+        run: |
+          "$RUNNER_TEMP/analyzer/bin/python" tools/research/ghidra/fixture.py \
+            --headless "$GHIDRA_INSTALL_DIR/support/analyzeHeadless" --pyghidra --work "$RUNNER_TEMP/inventory"
+          python3 tools/research/matching/check_fixture.py --ghidra "$GHIDRA_INSTALL_DIR" --output "$RUNNER_TEMP/matching"
