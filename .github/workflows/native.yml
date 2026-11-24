@@ -4,11 +4,6 @@ on:
   pull_request:
     branches: ['game/a1.2.10']
   workflow_dispatch:
-    inputs:
-      gum_probe:
-        description: Run the pinned Gum devkit against the original isolated fixture
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -21,6 +16,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 2
       - name: Configure
         run: cmake -S . -B build/native -DCMAKE_C_FLAGS="-Wall -Wextra -Werror -pedantic"
       - name: Build
@@ -28,8 +24,14 @@ jobs:
       - name: Exercise the example and target checks
         run: ctest --test-dir build/native --output-on-failure
 
+      - name: Check whether the Gum fixture changed
+        id: gum
+        if: github.event_name == 'pull_request'
+        run: |
+          paths=$(git diff --name-only HEAD^1 HEAD -- tests/mappings/gum_probe.c tests/mappings/CMakeLists.txt .github/workflows/native.yml)
+          if [[ -n "$paths" ]]; then echo 'changed=true' >> "$GITHUB_OUTPUT"; fi
       - name: Exercise Gum on the stripped original fixture
-        if: github.event_name == 'workflow_dispatch' && inputs.gum_probe
+        if: steps.gum.outputs.changed == 'true'
         run: |
           mkdir -p build/gum-devkit
           curl -fsSL --retry 3 -o build/gum-devkit/devkit.tar.xz \

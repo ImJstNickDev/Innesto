@@ -102,5 +102,5 @@ cmake --build build/gum-probe --target innesto-gum-probe
 ctest --test-dir build/gum-probe -V -R '^native-gum-probe$'
 ```
 
-The manual **Native initialization** workflow accepts `gum_probe` to run the
-same check. Ordinary fixture tests build offline.
+The native CI workflow also runs this check when a pull request changes the
+Gum probe, its build rules or the workflow. Ordinary fixture tests build offline.
