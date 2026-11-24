@@ -28,5 +28,6 @@ if(BUILD_TESTING)
     add_test(NAME native-init COMMAND "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/tests/native_init.py" "$<TARGET_FILE_DIR:innesto-bootstrap>"
         "${CMAKE_C_COMPILER}")
+    add_test(NAME mod-packages COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/test_packages.py")
     add_test(NAME launch-validation COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/test_launch.py")
 endif()

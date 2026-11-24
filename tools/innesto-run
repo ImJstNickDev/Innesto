@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Start the supported local dedicated server with one trusted Innesto mod."""
+"""Start the supported local dedicated server with trusted Innesto mods."""
 
 import argparse
+from contextlib import contextmanager
 import fcntl
 import hashlib
 import json
@@ -13,6 +14,8 @@ import re
 import stat
 import struct
 import sys
+
+from innesto_packages import discover_mods
 
 
 ET_EXEC = 2
@@ -82,6 +85,17 @@ def verify_bootstrap(loader, directory):
         raise ValueError("bootstrap file cannot be mapped for execution") from exc
 
 
+@contextmanager
+def mod_list(mods):
+    with os.fdopen(os.memfd_create("innesto-mod-list", os.MFD_CLOEXEC), "wb") as plan:
+        for mod in mods:
+            plan.write(os.fsencode(mod) + b"\0")
+        plan.seek(0)
+        fd = fcntl.fcntl(plan.fileno(), fcntl.F_DUPFD_CLOEXEC, 3)
+        with os.fdopen(fd, "rb") as inherited:
+            yield inherited
+
+
 def run(args):
     if sys.platform != "linux" or platform.machine() != "x86_64":
         raise ValueError("unsupported target platform")
@@ -97,9 +111,13 @@ def run(args):
         if hashlib.file_digest(target, "sha256").hexdigest() != expected_digest:
             raise ValueError("unsupported target fingerprint")
 
-        mod = args.mod.resolve(strict=True)
-        if not mod.is_file():
-            raise ValueError("mod must be a regular file")
+        if args.mods_dir is not None:
+            mods = discover_mods(args.mods_dir)
+        else:
+            mod = args.mod.resolve(strict=True)
+            if not mod.is_file():
+                raise ValueError("mod must be a regular file")
+            mods = [mod]
         loader_path = args.loader.resolve(strict=True)
         with loader_path.open("rb") as loader:
             elf_type, segments = elf_segments(loader)
@@ -111,11 +129,11 @@ def run(args):
             # Always use a nonstandard descriptor, including for daemon launches
             # with one or more of stdin, stdout and stderr closed.
             fd = fcntl.fcntl(loader.fileno(), fcntl.F_DUPFD_CLOEXEC, 3)
-            with os.fdopen(fd, "rb") as inherited:
-                launch_target(target, executable, inherited, mod, args.server_args)
+            with os.fdopen(fd, "rb") as inherited, mod_list(mods) as plan:
+                launch_target(target, executable, inherited, plan, args.server_args)
 
 
-def launch_target(target, executable, inherited, mod, arguments):
+def launch_target(target, executable, inherited, plan, arguments):
     fd = inherited.fileno()
     preload = f"/proc/self/fd/{fd}"
     with open(preload, "rb") as proc_entry:
@@ -130,8 +148,10 @@ def launch_target(target, executable, inherited, mod, arguments):
     env["LD_PRELOAD"] = preload + (f" {previous}" if previous else "")
     env["INNESTO_LOADER_FD"] = str(fd)
     env["INNESTO_INIT_PID"] = str(os.getpid())
-    env["INNESTO_MOD_PATH"] = str(mod)
+    env.pop("INNESTO_MOD_PATH", None)
+    env["INNESTO_MOD_LIST_FD"] = str(plan.fileno())
     os.set_inheritable(fd, True)
+    os.set_inheritable(plan.fileno(), True)
     os.execve(target.fileno(), [executable, *arguments], env)
 
 
@@ -139,7 +159,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", required=True, type=Path, help="private trusted target profile")
     parser.add_argument("--loader", required=True, type=Path, help="Innesto shared library")
-    parser.add_argument("--mod", required=True, type=Path, help="mod shared library")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--mod", type=Path, help="one mod shared library")
+    source.add_argument("--mods-dir", type=Path, help="directory containing unpacked server mod packages")
     parser.add_argument("server_args", nargs=argparse.REMAINDER, help="server arguments after --")
     args = parser.parse_args()
     if args.server_args[:1] == ["--"]:

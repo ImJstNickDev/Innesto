@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "observer",
+  "version": "1.0.0",
+  "game": "a1.2.10",
+  "api": 1,
+  "environment": "server",
+  "entrypoint": "innesto-observer.so",
+  "depends": {
+    "hello": "*"
+  }
+}
