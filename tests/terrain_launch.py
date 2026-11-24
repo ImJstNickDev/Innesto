@@ -101,12 +101,13 @@ int main(int argc, char **argv) {
         (cls.pack / "blocks").mkdir(parents=True)
         (cls.pack / "pack.txt").write_text("resolution 32\ntile ow_fixture 1.000000 0 roche\n")
         cls.packages = cls.base / "mods"
-        for name in ("copperfield", "tidepool"):
+        for name in ("copperfield", "tidepool", "reedbed"):
             out = cls.base / ("build-" + name)
             subprocess.run(["cmake", "-S", ROOT / "examples" / name, "-B", out,
                             "-DINNESTO_INCLUDE_DIR=" + str(ROOT / "include")], check=True, stdout=subprocess.PIPE)
             subprocess.run(["cmake", "--build", out], check=True, stdout=subprocess.PIPE)
-            subprocess.run(["cmake", "--install", out, "--prefix", cls.packages], check=True, stdout=subprocess.PIPE)
+            prefix = cls.base / "v2-packages" if name == "reedbed" else cls.packages
+            subprocess.run(["cmake", "--install", out, "--prefix", prefix], check=True, stdout=subprocess.PIPE)
         shutil.copyfile(cls.packages / "copperfield/assets/ochre.png", cls.pack / "blocks/ow_fixture.png")
 
     def setUp(self):
@@ -176,6 +177,38 @@ int main(int argc, char **argv) {
         self.assertEqual(lock.read_bytes(), saved)
         self.assertEqual(stock_fingerprint(self.stock), stock_fingerprint(self.pack))
 
+    def test_existing_world_accepts_equivalent_explicit_rock(self):
+        args = ("--data-dir", str(self.world))
+        self.assert_loaded(self.launch(*args))
+        receipt = self.world / "innesto-terrain-v1.json"
+        before = receipt.read_bytes()
+        path = self.mods / "copperfield/innesto.mod.json"
+        manifest = json.loads(path.read_bytes())
+        manifest["content"]["version"] = 2
+        manifest["content"]["terrain"][0].update(family="rock", tileMeters=1)
+        path.write_text(json.dumps(manifest))
+        self.assert_loaded(self.launch(*args))
+        self.assertEqual(before, receipt.read_bytes())
+
+    def test_independent_plant_package_and_mismatched_gameplay_definition(self):
+        shutil.rmtree(self.mods / "tidepool")
+        shutil.copytree(self.base / "v2-packages/reedbed", self.mods / "reedbed")
+        args = ("--data-dir", str(self.world))
+        result = self.launch(*args)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for mod in ("copperfield", "reedbed"):
+            self.assertIn(f"Innesto {mod} initialized", result.stderr)
+        receipt = self.world / "innesto-terrain-v1.json"
+        before = receipt.read_bytes()
+        path = self.mods / "reedbed/innesto.mod.json"
+        original = path.read_text()
+        for changed in ({"family": "rock"}, {"tileMeters": 1}):
+            manifest = json.loads(original)
+            manifest["content"]["terrain"][0].update(changed)
+            path.write_text(json.dumps(manifest))
+            self.assert_refused(self.launch(*args))
+            self.assertEqual(receipt.read_bytes(), before)
+
     def test_visible_client_checks_chosen_peer_before_startup(self):
         served = self.instance / "dashboard"
         (served / "api").mkdir(parents=True)
@@ -202,6 +235,14 @@ int main(int argc, char **argv) {
                     return subprocess.run([*args, *extra], cwd=self.instance, capture_output=True,
                                           text=True, timeout=10, env={**os.environ, "XDG_CACHE_HOME": str(self.instance / "cache")})
                 self.assert_loaded(invoke())
+                path = self.mods / "copperfield/innesto.mod.json"
+                original = path.read_text()
+                manifest = json.loads(original)
+                manifest["content"]["version"] = 2
+                manifest["content"]["terrain"][0]["family"] = "plant"
+                path.write_text(json.dumps(manifest))
+                self.assert_refused(invoke())
+                path.write_text(original)
                 self.assert_refused(invoke(("--play", "127.0.0.1:24712")))
                 catalogue.write_text(json.dumps({"materials": rows[:-1]}))
                 self.assert_refused(invoke())

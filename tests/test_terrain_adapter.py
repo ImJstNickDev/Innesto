@@ -33,6 +33,8 @@ def png(rows=ROWS, header=HEADER):
 class Material:
     id: str
     texture: Path
+    family: str = "rock"
+    tile_meters: float = 1.0
 
 
 class TerrainAdapterTests(unittest.TestCase):
@@ -92,6 +94,27 @@ class TerrainAdapterTests(unittest.TestCase):
         self.assertEqual(clone.read_bytes(), extra.read_bytes())
         clone.write_bytes(b"updated privately")
         self.assertEqual(extra.read_bytes(), b"asset outside the tile directory")
+
+    def test_v1_receipt_matches_legacy_bytes_and_v2_binds_each_trait(self):
+        stock = terrain.stock_fingerprint(self.stock)
+        key = "garden:mint"
+        material = Material(key, self.image)
+        default = self.stage([key])
+        # This is the 6efd523 wire format. Both existing worlds and old clients
+        # identify a default material by the SHA-256 of these exact PNG bytes.
+        old_hash = hashlib.sha256(b"Innesto terrain receipt v1\0" + bytes.fromhex(stock)).hexdigest()
+        image = self.image.read_bytes()
+        legacy_png = image[:-12] + chunk(b"tEXt", b"Innesto\0" + old_hash.encode()) + image[-12:]
+        self.assertEqual(default, {key: hashlib.sha256(legacy_png).hexdigest()})
+        variants = [("plant", 1, "plante"), ("rock", 0.5, "roche"), ("plant", 0.5, "plante")]
+        digests = {default[key]}
+        for index, (family, scale, native_family) in enumerate(variants):
+            material.family, material.tile_meters = family, scale
+            dest = self.root / f"staged-{index}"
+            receipt = terrain.stage_pack(self.stock, dest, [material], stock)
+            self.assertIn(f"{scale:.6f} 0 {native_family}", (dest / "pack.txt").read_text().splitlines()[-1])
+            digests.add(receipt[key])
+        self.assertEqual(len(digests), len(variants) + 1)
 
     def test_stock_pin_covers_names_bytes_and_empty_directories(self):
         fingerprint = terrain.stock_fingerprint(self.stock)

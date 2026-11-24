@@ -79,6 +79,29 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(materials, expected)
             self.assertTrue(all(isinstance(mod.terrain, tuple) for mod in mods))
 
+    def test_v2_terrain_traits_are_typed_and_v1_stays_strict(self):
+        directory, _ = self.terrain_package("copper")
+        path = directory / MANIFEST
+        data = json.loads(path.read_text())
+        content = data["content"]
+        tile = content["terrain"][0]
+        tile.update(family="plant", tileMeters=0.5)
+        path.write_text(json.dumps(data))
+        with self.assertRaisesRegex(ValueError, "unknown field"):
+            select_packages(self.mods, "client")
+        content["version"] = 2
+        path.write_text(json.dumps(data))
+        material, = select_packages(self.mods, "server")[0].terrain
+        self.assertEqual((material.family, material.tile_meters), ("plant", 0.5))
+        for key, value in (("family", "unregistered"), ("family", ["plant"]),
+                           ("tileMeters", True), ("tileMeters", 0), ("tileMeters", "0.5"),
+                           ("tileMeters", float("nan")), ("tileMeters", {})):
+            with self.subTest(key=key, value=value):
+                content["terrain"] = [{**tile, key: value}]
+                path.write_text(json.dumps(data))
+                with self.assertRaisesRegex(ValueError, key):
+                    select_packages(self.mods, "server")
+
     def test_content_schema_and_material_identifiers(self):
         directory, _ = self.terrain_package("copper")
         manifest = directory / MANIFEST
@@ -87,7 +110,7 @@ class PackageTests(unittest.TestCase):
         tile = content["terrain"][0]
         invalid = [
             (None, "content"), ({}, "version"), ({**content, "version": True}, "version"),
-            ({**content, "version": 1.0}, "version"), ({**content, "version": 2}, "version"),
+            ({**content, "version": 1.0}, "version"), ({**content, "version": 3}, "version"),
             ({**content, "unexpected": 1}, "unexpected"),
             ({"version": 1, "terrain": [tile]}, "assets"),
             ({"version": 1, "assets": "assets"}, "terrain"),

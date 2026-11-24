@@ -20,6 +20,33 @@ Put the original image at `assets/ochre.png` in the package. Version 1 takes non
 
 The registration contract is declarative and runs before native initialization. Mod authors use the namespaced ID in the package. For operator placement, use the material name shown by the running dedicated server's dashboard. Numeric material slots belong to the world and depend on its pinned base catalogue.
 
+## Choose terrain properties in version 2
+
+Set `content.version` to `2` to select a family and the number of metres covered by one texture tile. These fields apply to each material. A package can contain several families.
+
+```json
+"content": {
+  "version": 2,
+  "assets": "assets",
+  "terrain": [
+    { "id": "reedbed:rush", "texture": "rush.png", "family": "plant", "tileMeters": 0.5 }
+  ]
+}
+```
+
+| Family | Dedicated server classification |
+| --- | --- |
+| `rock` | Solid, opaque terrain. The default. |
+| `plant` | Non-solid vegetation with cutout rendering. |
+| `crop` | Non-solid terrain with cutout rendering. The server does not mark it as vegetation. |
+| `foliage` | Solid terrain with cutout rendering. |
+| `glass` | Solid terrain with blended rendering. |
+| `liquid` | Non-solid terrain classified as liquid. |
+
+The server applies these properties to placed voxels. In a controlled test it counted an elevated rock pad as the terrain surface, looked through an equally sized plant pad to the stone below, and reported liquid depth for a liquid pad. A suspended plant and a suspended rock also behaved differently when their cells were read back. These tests cover terrain classification and support. Crop growth, fluid simulation, custom drops and recipe registration have separate requirements.
+
+`tileMeters` accepts `0.25`, `0.5`, `1`, `1.5`, `2` or `2.5`. It defaults to `1`. Smaller values repeat the texture over a shorter distance. Every version 1 material retains its original one-metre rock definition. Writing those same defaults in version 2 preserves the material's compatibility with its existing world.
+
 ## Install both examples
 
 From a Linux x86-64 checkout of `game/a1.2.10`, build each mod independently and install the two resulting package directories on both peers.
@@ -27,14 +54,14 @@ From a Linux x86-64 checkout of `game/a1.2.10`, build each mod independently and
 ```sh
 cmake -S . -B build/native
 cmake --build build/native
-for mod in copperfield tidepool; do
+for mod in copperfield reedbed; do
   cmake -S "examples/$mod" -B "build/$mod" -DINNESTO_INCLUDE_DIR="$PWD/include"
   cmake --build "build/$mod"
   cmake --install "build/$mod" --prefix "$PWD/build/terrain-mods"
 done
 ```
 
-This installs `copperfield:ochre` and `tidepool:lagoon`. Each package carries its own texture and library. Use the same packages on the server and every Innesto client.
+This installs `copperfield:ochre` (rock, version 1) and `reedbed:rush` (plant, version 2). The original `tidepool` package is also available for worlds created with the two version 1 examples. Each package carries its own texture and library. Use the same packages on the server and every Innesto client.
 
 ## Prepare the target profiles once
 
@@ -74,6 +101,6 @@ Before starting the client, Innesto reads the chosen server's dashboard catalogu
 
 Innesto sorts namespaced IDs, stages a private runtime under `$XDG_CACHE_HOME/innesto/terrain` (default `~/.cache/innesto/terrain`) and runs an identical copy of the verified executable with the generated assets. It removes this copy on normal exit. The original installation and package files stay in place.
 
-The first launch writes `innesto-terrain-v1.json` inside the dedicated world's data directory. **Back up the entire directory, including this file.** Repeat launches check the exact content set, its textures and build before the game opens the world. Reordering package directories is safe. To resume after a mismatch, restore the recorded build and original package content. A new material set needs a new world. A populated world without its registry cannot be adopted by this version.
+The first launch writes `innesto-terrain-v1.json` inside the dedicated world's data directory. **Back up the entire directory, including this file.** Repeat launches check the exact content set, its textures, material properties and build before the game opens the world. Reordering package directories is safe. To resume after a mismatch, restore the recorded build and original package content. A new material set needs a new world. A populated world without its registry cannot be adopted by this version.
 
 Always reopen a managed world through Innesto. The stock executable and other launchers do not enforce Innesto's registry. The server and its clients must use matching terrain-enabled profiles. Independently launched clients are outside the launcher's preflight.

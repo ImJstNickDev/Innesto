@@ -18,6 +18,8 @@ REQUIRED_FIELDS = {"schemaVersion", "id", "version", "game", "api", "environment
 class TerrainMaterial:
     id: str
     texture: Path
+    family: str = "rock"
+    tile_meters: float = 1.0
 
 
 @dataclass
@@ -83,8 +85,8 @@ def check_fields(data, name, required, optional=frozenset()):
 
 def read_terrain(content, directory, mod_id):
     check_fields(content, "content", {"version", "assets", "terrain"})
-    if type(content["version"]) is not int or content["version"] != 1:
-        raise ValueError("content.version must be the integer 1")
+    if type(content["version"]) is not int or content["version"] not in (1, 2):
+        raise ValueError("content.version must be the integer 1 or 2")
     if not isinstance(content["terrain"], list):
         raise ValueError("content.terrain must be an array")
     try:
@@ -98,7 +100,14 @@ def read_terrain(content, directory, mod_id):
     prefix = mod_id + ":"
     for index, item in enumerate(content["terrain"]):
         field = f"content.terrain[{index}]"
-        check_fields(item, field, {"id", "texture"})
+        optional = {"family", "tileMeters"} if content["version"] == 2 else set()
+        check_fields(item, field, {"id", "texture"}, optional)
+        family = item.get("family", "rock")
+        if family not in ("rock", "plant", "liquid", "glass", "foliage", "crop"):
+            raise ValueError(f"{field}.family must be rock, plant, liquid, glass, foliage or crop")
+        scale = item.get("tileMeters", 1)
+        if type(scale) not in (float, int) or scale not in (0.25, 0.5, 1, 1.5, 2, 2.5):
+            raise ValueError(f"{field}.tileMeters must be one of 0.25, 0.5, 1, 1.5, 2 or 2.5")
         material_id = item["id"]
         if (not isinstance(material_id, str) or not material_id.startswith(prefix)
                 or not matches(MOD_ID, material_id[len(prefix):])):
@@ -109,7 +118,7 @@ def read_terrain(content, directory, mod_id):
             texture = confined_file(assets, relative_path(item["texture"]), "assets directory")
         except (ValueError, OSError, RuntimeError) as exc:
             raise ValueError(f"invalid texture for {material_id!r}: {file_error(exc)}") from exc
-        materials[material_id] = TerrainMaterial(material_id, texture)
+        materials[material_id] = TerrainMaterial(material_id, texture, family, float(scale))
     return tuple(materials.values())
 
 

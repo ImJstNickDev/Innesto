@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "reedbed",
+  "version": "1.0.0",
+  "game": "a1.2.10",
+  "api": 1,
+  "environment": "shared",
+  "entrypoint": "reedbed.so",
+  "content": {
+    "version": 2,
+    "assets": "assets",
+    "terrain": [
+      {"id": "reedbed:rush", "texture": "rush.png", "family": "plant", "tileMeters": 0.5}
+    ]
+  }
+}
