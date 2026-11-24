@@ -1,5 +1,6 @@
 """Validate package discovery, dependency ordering and the launcher handoff."""
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -164,6 +165,38 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(plan.read(), b"".join(os.fsencode(path) + b"\0" for path in libraries))
         with mod_list([]) as plan:
             self.assertEqual(plan.read(), b"")
+
+    def test_both_cli_modes_check_resolved_paths_for_glibc_tokens_before_launch(self):
+        host = self.scratch / "host"
+        subprocess.run(["cc", "-x", "c", "-", "-o", host], input=b"int main(void) { return 0; }",
+                       env={**os.environ, "TMPDIR": str(self.scratch)}, check=True)
+        profile = self.scratch / "profile.json"
+        profile.write_text(json.dumps({"version": "a1.2.10", "platform": "linux-x86_64",
+                                       "executable": str(host), "sha256": hashlib.sha256(host.read_bytes()).hexdigest()}))
+        library = self.package("sample")
+        # Keep CLI and manifest paths constant. Only the resolved target's parent changes.
+        library.unlink()
+        invalid = ["$ORIGIN", "one$LIB", "${PLATFORM}tail", "$PLATFORM-", "$$ORIGIN", "$LIBé"]
+        valid = ["$HOME", "$ORIGINAL", "$LIB2", "$PLATFORM_", "${LIBS}", "${LIB", "$5"]
+        for name in invalid + valid:
+            target = library.parent / name / "module.so"
+            target.parent.mkdir()
+            target.touch()
+            library.symlink_to(target)
+            for choice in (["--mod", library], ["--mods-dir", self.mods]):
+                with self.subTest(name=name, option=choice[0]):
+                    # Supplying an executable as the loader identifies reaching
+                    # the next validation stage without starting any native code.
+                    result = subprocess.run([LAUNCHER, "--profile", profile, "--loader", host, *choice],
+                                            capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    if name in invalid:
+                        self.assertIn("dynamic loader token", result.stderr)
+                        self.assertIn(repr(name), result.stderr)
+                        self.assertIn("rename", result.stderr)
+                    else:
+                        self.assertIn("loader must be a Linux x86-64 shared library", result.stderr)
+            library.unlink()
 
     def test_cli_requires_exactly_one_mod_source(self):
         for args in [[], ["--mod", "library", "--mods-dir", "mods"]]:

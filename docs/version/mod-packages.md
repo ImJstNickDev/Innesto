@@ -79,7 +79,9 @@ Here is the installed `observer/innesto.mod.json`.
 
 Use one manifest per immediate subdirectory. Every field except `depends` is
 required. Loose files at the top level are ignored. Unknown manifest fields
-and duplicate JSON keys are errors.
+and duplicate JSON keys are errors. Choose installation paths without literal
+dynamic linker tokens such as `$ORIGIN`, `$LIB` or `${PLATFORM}`. Those tokens
+have special meaning to glibc even inside an absolute library path.
 
 ## Initialization and errors
 

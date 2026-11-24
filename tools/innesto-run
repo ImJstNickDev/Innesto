@@ -22,6 +22,7 @@ ET_EXEC = 2
 ET_DYN = 3
 PT_DYNAMIC = 2
 PT_INTERP = 3
+LOADER_TOKEN = re.compile(r"\$(?:\{(?:ORIGIN|LIB|PLATFORM)\}|(?:ORIGIN|LIB|PLATFORM)(?![a-zA-Z0-9_]))")
 
 
 def read_profile(path):
@@ -85,6 +86,16 @@ def verify_bootstrap(loader, directory):
         raise ValueError("bootstrap file cannot be mapped for execution") from exc
 
 
+def validate_mod_path(path):
+    # dlopen expands these tokens even in absolute filenames. Unbraced
+    # token names end at the first byte outside the ASCII identifier set.
+    for part in path.parts:
+        token = LOADER_TOKEN.search(part)
+        if token:
+            raise ValueError(f"dynamic loader token {token[0]!r} in mod path component {part!r}: "
+                             "rename that file or directory before starting the server")
+
+
 @contextmanager
 def mod_list(mods):
     with os.fdopen(os.memfd_create("innesto-mod-list", os.MFD_CLOEXEC), "wb") as plan:
@@ -118,6 +129,8 @@ def run(args):
             if not mod.is_file():
                 raise ValueError("mod must be a regular file")
             mods = [mod]
+        for mod in mods:
+            validate_mod_path(mod)
         loader_path = args.loader.resolve(strict=True)
         with loader_path.open("rb") as loader:
             elf_type, segments = elf_segments(loader)

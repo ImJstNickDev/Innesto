@@ -41,8 +41,8 @@ int innesto_mod_init_v1(void)
 The call runs synchronously on the startup thread. Returning zero allows
 startup to continue. A missing entrypoint or a nonzero return stops
 startup with an error. The library stays loaded for the lifetime of the
-process. A native mod
-runs with the same permissions as the server, so select a build you trust.
+process. A native mod runs with the same permissions as the server, so select
+a build you trust.
 
 ## Start a private target
 
@@ -75,6 +75,7 @@ innesto_root=$(pwd -P)
 )
 ```
 
+Use a library path free of literal glibc tokens such as `$ORIGIN` or `$LIB`.
 Append the server's usual arguments after `--`. The example emits
 `Innesto hello initialized (pid=N)` to standard error. Compare `N` with
 the running server PID and check that the server reaches its ready state.
