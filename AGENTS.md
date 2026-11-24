@@ -39,7 +39,10 @@ against local installations and servers under the tester's control.
 Exercise the public launcher and independently built mods. Verify unsupported
 builds, unavailable capabilities and legacy server packages. Record the
 physical environment and distinguish process initialization, gameplay
-observations and fixture results.
+observations and fixture results. Prefer a hidden client or an isolated virtual
+display for local multiplayer acceptance. Keep its input and audio separate
+from the operator's desktop. Use an interactive player session when the
+observation requires it.
 
 Update the version guide alongside every change to a mod-facing contract.
 Keep gameplay issues open until all their real-game acceptance steps pass.
