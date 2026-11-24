@@ -79,6 +79,48 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(materials, expected)
             self.assertTrue(all(isinstance(mod.terrain, tuple) for mod in mods))
 
+    def test_v2_terrain_traits_are_typed_and_v1_stays_strict(self):
+        directory, _ = self.terrain_package("copper")
+        path = directory / MANIFEST
+        data = json.loads(path.read_text())
+        content = data["content"]
+        tile = content["terrain"][0]
+        tile.update(family="plant", tileMeters=0.5)
+        path.write_text(json.dumps(data))
+        with self.assertRaisesRegex(ValueError, "unknown field"):
+            select_packages(self.mods, "client")
+        content["version"] = 2
+        path.write_text(json.dumps(data))
+        material, = select_packages(self.mods, "server")[0].terrain
+        self.assertEqual((material.family, material.tile_meters), ("plant", 0.5))
+        for key, value in (("family", "unregistered"), ("family", ["plant"]),
+                           ("tileMeters", True), ("tileMeters", 0), ("tileMeters", "0.5"),
+                           ("tileMeters", float("nan")), ("tileMeters", {})):
+            with self.subTest(key=key, value=value):
+                content["terrain"] = [{**tile, key: value}]
+                path.write_text(json.dumps(data))
+                with self.assertRaisesRegex(ValueError, key):
+                    select_packages(self.mods, "server")
+
+    def test_v2_frames_resolve_in_author_order_and_stay_inside_assets(self):
+        root, image = self.terrain_package("copper")
+        path = root / MANIFEST
+        data = json.loads(path.read_text())
+        content = data["content"]
+        content["version"] = 2
+        tile = content["terrain"][0]
+        second = image.with_name("other.png")
+        second.touch()
+        tile["frames"] = ["tiles/other.png", "tiles/ore.png"]
+        path.write_text(json.dumps(data))
+        self.assertEqual(select_packages(self.mods, "client")[0].terrain[0].frames, (second, image))
+        for frames in ("tiles/ore.png", ["/elsewhere"], ["../innesto.mod.json"],
+                       ["missing.png"], ["tiles/ore.png"] * 16):
+            tile["frames"] = frames
+            path.write_text(json.dumps(data))
+            with self.subTest(frames=frames), self.assertRaisesRegex(ValueError, "frames"):
+                select_packages(self.mods, "server")
+
     def test_content_schema_and_material_identifiers(self):
         directory, _ = self.terrain_package("copper")
         manifest = directory / MANIFEST
@@ -87,7 +129,7 @@ class PackageTests(unittest.TestCase):
         tile = content["terrain"][0]
         invalid = [
             (None, "content"), ({}, "version"), ({**content, "version": True}, "version"),
-            ({**content, "version": 1.0}, "version"), ({**content, "version": 2}, "version"),
+            ({**content, "version": 1.0}, "version"), ({**content, "version": 3}, "version"),
             ({**content, "unexpected": 1}, "unexpected"),
             ({"version": 1, "terrain": [tile]}, "assets"),
             ({"version": 1, "assets": "assets"}, "terrain"),

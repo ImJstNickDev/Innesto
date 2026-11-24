@@ -11,6 +11,7 @@ import signal
 import tempfile
 
 from adapters.a1_2_10 import terrain, terrain_target as routing
+from adapters.a1_2_10.terrain_names import stage_display_names
 from innesto_packages import unique_keys
 
 
@@ -153,6 +154,8 @@ def start(target, executable, digest, environment, mods, profile, arguments, lau
         generated = runtime / "assets" / stock.relative_to(source_assets)
         generated.parent.chmod(generated.parent.stat().st_mode | 0o700)
         textures = terrain.stage_pack(stock, generated, materials, baseline)
+        if world is None:
+            stage_display_names(runtime / "assets", materials)
         image = runtime / Path(executable).name
         target.seek(0)
         with image.open("xb") as dest:
