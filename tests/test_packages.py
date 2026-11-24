@@ -102,6 +102,25 @@ class PackageTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, key):
                     select_packages(self.mods, "server")
 
+    def test_v2_frames_resolve_in_author_order_and_stay_inside_assets(self):
+        root, image = self.terrain_package("copper")
+        path = root / MANIFEST
+        data = json.loads(path.read_text())
+        content = data["content"]
+        content["version"] = 2
+        tile = content["terrain"][0]
+        second = image.with_name("other.png")
+        second.touch()
+        tile["frames"] = ["tiles/other.png", "tiles/ore.png"]
+        path.write_text(json.dumps(data))
+        self.assertEqual(select_packages(self.mods, "client")[0].terrain[0].frames, (second, image))
+        for frames in ("tiles/ore.png", ["/elsewhere"], ["../innesto.mod.json"],
+                       ["missing.png"], ["tiles/ore.png"] * 16):
+            tile["frames"] = frames
+            path.write_text(json.dumps(data))
+            with self.subTest(frames=frames), self.assertRaisesRegex(ValueError, "frames"):
+                select_packages(self.mods, "server")
+
     def test_content_schema_and_material_identifiers(self):
         directory, _ = self.terrain_package("copper")
         manifest = directory / MANIFEST

@@ -1,6 +1,7 @@
 """Stage the a1.2.10 terrain pack for one private runtime."""
 
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -9,6 +10,7 @@ import stat
 import struct
 import zlib
 
+from .terrain_frames import stage_frames
 
 COMPONENT = r"[a-z][a-z0-9_-]*"
 MATERIAL_ID = re.compile(f"({COMPONENT}):({COMPONENT})", re.ASCII)
@@ -158,15 +160,19 @@ def _stock_names(descriptor, blocks):
     return names | {_tile_family(key) for key in names}
 
 
-def _receipt(stock_digest, parameters):
+def _receipt(stock_digest, parameters, names, frames):
     # Commit to the adapter contract and base assets in the PNG the peer can
     # actually fetch, without distributing the private stock fingerprint.
-    if parameters == V1_PARAMETERS:
+    if parameters == V1_PARAMETERS and not names and not frames:
         # Preserve existing worlds and the bytes consumed by version 1 peers.
         commitment = hashlib.sha256(b"Innesto terrain receipt v1\0" + bytes.fromhex(stock_digest))
     else:
-        commitment = hashlib.sha256(b"Innesto terrain receipt v2\0" + bytes.fromhex(stock_digest)
-                                    + parameters.encode("ascii"))
+        traits = [parameters, names]
+        if frames:
+            traits.append(frames)
+        definition = json.dumps(traits, sort_keys=True, ensure_ascii=False,
+                                separators=(",", ":")).encode("utf-8")
+        commitment = hashlib.sha256(b"Innesto terrain receipt v2\0" + bytes.fromhex(stock_digest) + definition)
     body = b"Innesto\0" + commitment.hexdigest().encode("ascii")
     return struct.pack(">I", len(body)) + b"tEXt" + body + struct.pack(">I", zlib.crc32(b"tEXt" + body))
 
@@ -192,9 +198,10 @@ def stage_pack(stock: Path, destination: Path, materials, expected_stock_sha256:
                 raise ValueError(f"terrain material collision for {material.id!r}")
             occupied.add(key)
             image = _texture_bytes(material.texture)
-            # Immediately before IEND, after the complete IDAT stream.
-            parameters = f"{material.tile_meters:.6f} 0 {NATIVE_FAMILIES[material.family]}"
-            image = image[:-12] + _receipt(digest, parameters) + image[-12:]
+            frames = stage_frames(blocks, key, material.frames, _texture_bytes)
+            parameters = f"{material.tile_meters:.6f} {int(bool(frames))} {NATIVE_FAMILIES[material.family]}"
+            # Insert the commitment immediately before IEND, after the complete IDAT stream.
+            image = image[:-12] + _receipt(digest, parameters, material.display_names, frames) + image[-12:]
             with (blocks / f"ow_{key}.png").open("xb") as stream:
                 stream.write(image)
             result[material.id] = hashlib.sha256(image).hexdigest()

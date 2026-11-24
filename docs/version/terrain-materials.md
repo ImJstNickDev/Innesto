@@ -1,6 +1,6 @@
 # Terrain materials
 
-A shared native package can register a named terrain material and its texture when Innesto launches a dedicated server or a client joining it. A material can be placed by the server's terrain editing tools. Inventory stacks, crafting recipes, custom block behavior and solo worlds have separate requirements.
+A shared native package can register terrain materials on a dedicated server and the clients that join it. Each material has a stable ID, an original texture and a family that the game uses for rendering and gameplay. The two examples in this guide can be collected and placed in Survival.
 
 ## Package a texture
 
@@ -43,13 +43,30 @@ Set `content.version` to `2` to select a family and the number of metres covered
 | `glass` | Solid terrain with blended rendering. |
 | `liquid` | Non-solid terrain classified as liquid. |
 
-The server applies these properties to placed voxels. In a controlled test it counted an elevated rock pad as the terrain surface, looked through an equally sized plant pad to the stone below, and reported liquid depth for a liquid pad. A suspended plant and a suspended rock also behaved differently when their cells were read back. These tests cover terrain classification and support. Crop growth, fluid simulation, custom drops and recipe registration have separate requirements.
+The server applies these properties to placed voxels. It counted an elevated rock pad as the terrain surface, looked through an equally sized plant pad to the stone below and reported liquid depth for a liquid pad. Suspended rock stayed in place. Plant voxels placed above open air disappeared and could be placed again in the same cells. The contract provides the game's family behavior. Growth rules, flow, drop tables and new recipes have no registration fields in this version.
 
 `tileMeters` accepts `0.25`, `0.5`, `1`, `1.5`, `2` or `2.5`. It defaults to `1`. Smaller values repeat the texture over a shorter distance. Every version 1 material retains its original one-metre rock definition. Writing those same defaults in version 2 preserves the material's compatibility with its existing world.
 
+### Name a material in the player's language
+
+In version 2 a material can supply a `displayNames` object, for example `{"it": "Giunco", "fr": "Jonc", "en-GB": "Rush"}`. The connected client uses the selected language on the **I** knowledge card. The Italian name also appeared on the target label and in the pickup notification during a Survival session. Regional selections follow the game's own fallback order. Default English (`en`) uses the generated name. British English (`en-GB`) accepts a supplied translation. The operator key and saved material ID stay the same in every language.
+
+Use the exact locale code from this list:
+
+```text
+ar bn ca cs da de de-CH el en-GB es es-419 fa fi fil fr fr-CA he hi hu id it ja ko
+mr ms nb nl pl pt-BR pt-PT ro ru sv sw ta te th tr uk ur vi wa zh-Hans zh-Hant
+```
+
+A name is 1–64 characters after Unicode NFC normalization, on a single line without leading or trailing whitespace or control characters. Innesto stages translations into the client's private runtime. Only the mod's own names belong in the package.
+
+### Animate a texture
+
+The optional `frames` field lists up to 15 **additional** images in playback order. The `texture` field supplies the base image. For example, `"texture": "ember.png", "frames": ["ember-bright.png", "ember-dim.png"]` uses three mod-owned 32 × 32 RGBA PNGs under the asset directory. Omit `frames` or use an empty array for a static tile. Playback uses the game's timing.
+
 ## Install both examples
 
-From a Linux x86-64 checkout of `game/a1.2.10`, build each mod independently and install the two resulting package directories on both peers.
+From a Linux x86-64 checkout of `game/a1.2.10`, build each mod independently. Install into a fresh example directory on each peer. CMake keeps other packages already installed under the same prefix.
 
 ```sh
 cmake -S . -B build/native
@@ -57,7 +74,7 @@ cmake --build build/native
 for mod in copperfield reedbed; do
   cmake -S "examples/$mod" -B "build/$mod" -DINNESTO_INCLUDE_DIR="$PWD/include"
   cmake --build "build/$mod"
-  cmake --install "build/$mod" --prefix "$PWD/build/terrain-mods"
+  cmake --install "build/$mod" --prefix "$PWD/build/terrain-survival-mods"
 done
 ```
 
@@ -80,7 +97,7 @@ Use a **new, empty data directory** the first time. Set the shell variables to a
 ```sh
 "$innesto_root/tools/innesto-run" --profile "$server_profile" \
   --loader "$innesto_root/build/native/innesto-bootstrap.so" \
-  --mods-dir "$innesto_root/build/terrain-mods" -- \
+  --mods-dir "$innesto_root/build/terrain-survival-mods" -- \
   --data-dir "$world_dir" --port 24710 --web --web-host 127.0.0.1 --webport 24711
 ```
 
@@ -89,13 +106,13 @@ Start a client with a legitimate local game directory and its normal licensed se
 ```sh
 "$innesto_root/tools/innesto-run" --profile "$client_profile" \
   --loader "$innesto_root/build/native/innesto-bootstrap.so" \
-  --mods-dir "$innesto_root/build/terrain-mods" --terrain-peer 127.0.0.1:24710 -- \
+  --mods-dir "$innesto_root/build/terrain-survival-mods" --terrain-peer 127.0.0.1:24710 -- \
   --game-dir "$client_game_dir"
 ```
 
 Choose **Multiplayer → Direct connect** in the visible window and enter the same address, `127.0.0.1:24710`. Openworld’s own `--play HOST:PORT` starts a hidden direct client for automated sessions. Innesto also checks the peer supplied by that flag.
 
-Before starting the client, Innesto reads the chosen server's dashboard catalogue and compares material names, absolute slots and served textures. The default dashboard TCP port is the game port plus one. Set `terrainDashboardPort` in the client profile for a different dashboard port. The client must be able to read that dashboard. These examples use loopback. The preflight applies to the selected address. Opening the menu does not restrict the game’s other server choices. It is a compatibility check at launch, so restart Innesto to change servers. The game retains its own authentication and admission rules.
+Before starting the client, Innesto reads the chosen server's dashboard catalogue and compares material names, absolute slots and served texture receipts. For each material, the receipt covers the base texture, family, scale, translations and ordered frame contents. Changing any of them requires matching packages on both sides and a new world. The default dashboard TCP port is the game port plus one. Set `terrainDashboardPort` in the client profile for a different dashboard port. The client must be able to read that dashboard. These examples use loopback. The preflight applies to the selected address. Opening the menu does not restrict the game’s other server choices. Restart Innesto to check a different server.
 
 ## Reopen and back up a world
 

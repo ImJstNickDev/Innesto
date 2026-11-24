@@ -202,7 +202,8 @@ int main(int argc, char **argv) {
         before = receipt.read_bytes()
         path = self.mods / "reedbed/innesto.mod.json"
         original = path.read_text()
-        for changed in ({"family": "rock"}, {"tileMeters": 1}):
+        for changed in ({"family": "rock"}, {"tileMeters": 1}, {"displayNames": {"it": "Giunco"}},
+                        {"frames": ["rush.png"]}):
             manifest = json.loads(original)
             manifest["content"]["terrain"][0].update(changed)
             path.write_text(json.dumps(manifest))
