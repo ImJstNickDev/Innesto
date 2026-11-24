@@ -3,8 +3,9 @@
 The development branch for **Openworld a1.2.10 on Linux x86-64** can start
 a local dedicated server with [installed mod packages](mod-packages.md) or
 one explicitly selected library. The bootstrap calls each mod once during
-process startup, before the server enters `main`. A mod can initialize its own state here. Game
-objects and gameplay callbacks require later lifecycle support.
+process startup, before the server enters `main`. API 2 adds an opaque mod
+context and a startup-complete notification for [client, server and shared
+packages](environments.md).
 
 ## Build the loader and example
 
@@ -27,7 +28,9 @@ in CI and requires no game installation.
 
 ## Write the entrypoint
 
-A mod is a native shared library that exports this C function itself.
+An API 1 mod is a native shared library that exports this C function itself.
+The single-library `--mod` command selects API 1 and takes no package ID.
+Use `--mods-dir` and a manifest to select API 2.
 
 ```c
 #include <innesto/mod.h>
@@ -52,8 +55,9 @@ A local maintainer profile is a JSON object with these fields.
 | --- | --- |
 | `version` | `a1.2.10` |
 | `platform` | `linux-x86_64` |
-| `executable` | Absolute path to the verified dedicated server executable |
+| `executable` | Absolute path to the verified target executable |
 | `sha256` | Expected SHA-256 of the executable from the verified reference package |
+| `environment` | Optional physical environment, `client` or `server`. Defaults to `server` for existing profiles. |
 
 Keep this profile private. Its digest pins the reference you trust. The
 launcher checks the selected file against that value and executes the same
