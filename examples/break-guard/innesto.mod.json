@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "break_guard",
+  "version": "1.0.0",
+  "game": "a1.2.10",
+  "api": 1,
+  "environment": "server",
+  "entrypoint": "innesto-break-guard.so",
+  "depends": {
+    "break_audit": "*"
+  }
+}

@@ -7,3 +7,7 @@ in dependency order before the server enters `main`.
 
 - [Build and load a mod package](mod-packages.md) to install the two example mods, write a manifest and declare dependencies.
 - [Native mod initialization](native-initialization.md) describes the public C entrypoint, the private target profile and how to launch a single library.
+
+The [draft block-break listener](before-block-break.md) can be exercised with
+a source-level test host. Integration with player actions on the dedicated
+server remains under development.

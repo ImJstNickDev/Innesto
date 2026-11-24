@@ -1,5 +1,7 @@
 #define _GNU_SOURCE
 
+#include "block_break_host.h"
+
 #include <dlfcn.h>
 #include <limits.h>
 #include <link.h>
@@ -141,6 +143,7 @@ __attribute__((constructor)) static void initialize_mods(void)
     for (struct mod *entry = mods; entry; entry = entry->next) {
         resolve_entrypoint(entry);
     }
+    innesto_block_break_open_registration();
     while (mods) {
         int result = mods->initialize();
         if (result != 0) {
@@ -153,4 +156,5 @@ __attribute__((constructor)) static void initialize_mods(void)
         free(mods);
         mods = next;
     }
+    innesto_block_break_finish_registration();
 }
