@@ -1,10 +1,17 @@
-#include "block_break_host.h"
+#include "block_break_adapter.h"
 
+#include <stdatomic.h>
 #include <stdlib.h>
 
-/* Only a host that implements the simulation contract supplies this function. */
-extern void innesto_host_set_before_block_break_v1(innesto_before_block_break_v1 callback)
-    __attribute__((weak, visibility("default")));
+enum adapter_state {
+    AWAITING_ADAPTER,
+    ADAPTER_ATTACHED,
+    NO_ADAPTER,
+    INACTIVE_BOOTSTRAP,
+    DISPATCH_READY
+};
+
+static _Atomic enum adapter_state state = AWAITING_ADAPTER;
 
 struct listener_entry {
     innesto_before_block_break_v1 call;
@@ -20,7 +27,8 @@ int innesto_register_before_block_break_v1(innesto_before_block_break_v1 listene
     if (!listener) {
         return INNESTO_BREAK_INVALID;
     }
-    if (!innesto_host_set_before_block_break_v1) {
+    enum adapter_state current = atomic_load(&state);
+    if (current != ADAPTER_ATTACHED && current != DISPATCH_READY) {
         return INNESTO_BREAK_UNAVAILABLE;
     }
     if (!registering) {
@@ -40,6 +48,14 @@ int innesto_register_before_block_break_v1(innesto_before_block_break_v1 listene
 
 static int before_block_break(const struct innesto_block_break_v1 *attempt)
 {
+    /* Publish the complete listener list before the first simulation call. */
+    enum adapter_state current = atomic_load(&state);
+    if (current == INACTIVE_BOOTSTRAP) {
+        return INNESTO_BREAK_PASS;
+    }
+    if (current != DISPATCH_READY) {
+        return INNESTO_BREAK_VETO;
+    }
     for (const struct listener_entry *entry = first; entry; entry = entry->next) {
         if (entry->call(attempt) != INNESTO_BREAK_PASS) {
             return INNESTO_BREAK_VETO;
@@ -48,15 +64,37 @@ static int before_block_break(const struct innesto_block_break_v1 *attempt)
     return INNESTO_BREAK_PASS;
 }
 
+int innesto_adapter_attach_before_block_break_v1(innesto_before_block_break_v1 *site)
+{
+    enum adapter_state expected = AWAITING_ADAPTER;
+    if (!site || !atomic_compare_exchange_strong(&state, &expected, ADAPTER_ATTACHED)) {
+        return 0;
+    }
+    *site = before_block_break;
+    return 1;
+}
+
+void innesto_block_break_bypass(void)
+{
+    atomic_store(&state, INACTIVE_BOOTSTRAP);
+}
+
+void innesto_block_break_seal_adapter(void)
+{
+    /* Mod libraries may execute constructors as soon as they are opened. */
+    enum adapter_state expected = AWAITING_ADAPTER;
+    atomic_compare_exchange_strong(&state, &expected, NO_ADAPTER);
+}
+
 void innesto_block_break_open_registration(void)
 {
-    registering = 1;
+    registering = atomic_load(&state) == ADAPTER_ATTACHED;
 }
 
 void innesto_block_break_finish_registration(void)
 {
-    registering = 0;
-    if (innesto_host_set_before_block_break_v1) {
-        innesto_host_set_before_block_break_v1(before_block_break);
+    if (registering) {
+        registering = 0;
+        atomic_store(&state, DISPATCH_READY);
     }
 }

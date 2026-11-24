@@ -9,5 +9,6 @@ in dependency order before the server enters `main`.
 - [Native mod initialization](native-initialization.md) describes the public C entrypoint, the private target profile and how to launch a single library.
 
 The [draft block-break listener](before-block-break.md) can be exercised with
-a source-level test host. Integration with player actions on the dedicated
-server remains under development.
+two native builds of the same test simulation. The adapted build calls the
+listener at its internal block rule. Connecting the corresponding decision
+in the dedicated server remains open.

@@ -1,6 +1,6 @@
 #define _GNU_SOURCE
 
-#include "block_break_host.h"
+#include "block_break_adapter.h"
 
 #include <dlfcn.h>
 #include <limits.h>
@@ -136,10 +136,12 @@ __attribute__((constructor)) static void initialize_mods(void)
     char current_pid[32];
     snprintf(current_pid, sizeof current_pid, "%ld", (long)getpid());
     if (!launch_pid || strcmp(launch_pid, current_pid) != 0) {
+        innesto_block_break_bypass();
         return;
     }
 
     struct mod *mods = consume_launch_context();
+    innesto_block_break_seal_adapter();
     for (struct mod *entry = mods; entry; entry = entry->next) {
         resolve_entrypoint(entry);
     }

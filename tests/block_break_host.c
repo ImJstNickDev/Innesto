@@ -1,20 +1,7 @@
 /* Original simulation fixture. The client here consumes the fixture's replies. */
-#include "block_break_host.h"
+#include "block_break_rules.h"
 
 #include <stdio.h>
-
-static innesto_before_block_break_v1 before_break;
-
-void innesto_host_set_before_block_break_v1(innesto_before_block_break_v1 callback)
-{
-    before_break = callback;
-}
-
-struct block {
-    struct innesto_block_break_v1 position;
-    int present;
-    int drops;
-};
 
 struct client_view {
     int present;
@@ -22,17 +9,15 @@ struct client_view {
     int corrections;
 };
 
-static void request_break(struct block *block, struct client_view *client)
+static void request_break(struct fixture_block *block, struct client_view *client)
 {
-    if (!block->present) {
-        return;
-    }
-
-    /* A client predicts removal while the simulation still owns the block. */
+    /* The client predicts removal before the simulation decides the request. */
     client->present = 0;
-    if (before_break && before_break(&block->position) != INNESTO_BREAK_PASS) {
-        client->present = block->present;
-        client->corrections++;
+    if (!fixture_break_permitted(block)) {
+        if (client->present != block->present) {
+            client->present = block->present;
+            client->corrections++;
+        }
         return;
     }
 
@@ -41,7 +26,7 @@ static void request_break(struct block *block, struct client_view *client)
     client->successes++;
 }
 
-static void print_state(const char *name, struct block block, struct client_view client)
+static void print_state(const char *name, struct fixture_block block, struct client_view client)
 {
     printf("%s world=%d drops=%d view=%d successes=%d corrections=%d\n",
            name, block.present, block.drops, client.present, client.successes, client.corrections);
@@ -49,8 +34,8 @@ static void print_state(const char *name, struct block block, struct client_view
 
 int main(void)
 {
-    struct block first = {.position = {.x = 4, .y = 64, .z = -3}, .present = 1};
-    struct block second = {.position = {.x = 0, .y = 65, .z = -7}, .present = 1};
+    struct fixture_block first = {.x = 4, .y = 64, .z = -3, .present = 1};
+    struct fixture_block second = {.x = 0, .y = 65, .z = -7, .present = 1};
     struct client_view first_view = {.present = 1};
     struct client_view second_view = {.present = 1};
 

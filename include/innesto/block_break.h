@@ -29,7 +29,7 @@ enum {
     INNESTO_BREAK_NO_MEMORY = 4
 };
 
-/* Call during mod initialization. Registration requires a connected simulation host. */
+/* Call during mod initialization. Registration requires an attached version adapter. */
 __attribute__((visibility("default")))
 int innesto_register_before_block_break_v1(innesto_before_block_break_v1 listener);
 

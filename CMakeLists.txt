@@ -22,13 +22,23 @@ include(CTest)
 if(BUILD_TESTING)
     find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
     add_executable(innesto-test-host tests/host.c)
-    add_executable(innesto-test-block-break-host tests/block_break_host.c)
-    target_include_directories(innesto-test-block-break-host PRIVATE include src)
-    set_target_properties(innesto-test-block-break-host PROPERTIES ENABLE_EXPORTS ON)
+    # Both executables use exactly the same simulation objects. The adapted
+    # executable adds a decision-site wrapper and an Innesto adapter at link time.
+    add_library(innesto-test-simulation OBJECT tests/block_break_host.c tests/block_break_rules.c)
+    # Keep the rule call visible to the native linker even in an LTO build.
+    target_compile_options(innesto-test-simulation PRIVATE -fno-lto)
+    add_executable(innesto-test-block-break-vanilla $<TARGET_OBJECTS:innesto-test-simulation>)
+    add_library(innesto-test-break-adapter SHARED tests/block_break_adapter.c)
+    target_include_directories(innesto-test-break-adapter PRIVATE include src)
+    add_executable(innesto-test-block-break-host
+        $<TARGET_OBJECTS:innesto-test-simulation> tests/block_break_wrap.c)
+    target_link_options(innesto-test-block-break-host PRIVATE "LINKER:--wrap=fixture_break_permitted")
+    target_link_libraries(innesto-test-block-break-host PRIVATE innesto-test-break-adapter)
     add_executable(innesto-test-break-dispatch tests/block_break_dispatch.c src/block_break.c)
     target_include_directories(innesto-test-break-dispatch PRIVATE include src)
     target_compile_features(innesto-test-break-dispatch PRIVATE c_std_11)
     add_test(NAME block-break-dispatch COMMAND innesto-test-break-dispatch)
+    add_test(NAME block-break-unattached COMMAND innesto-test-break-dispatch unattached)
     add_test(NAME block-break-packages COMMAND "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/tests/block_break.py" "$<TARGET_FILE_DIR:innesto-bootstrap>"
         "${CMAKE_C_COMPILER}")

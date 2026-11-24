@@ -1,11 +1,13 @@
 # Before a player breaks a block
 
-This draft implements a synchronous veto for a simulation host that can ask
-Innesto before it commits a player's block break. It targets Openworld
-a1.2.10 on Linux x86-64. The interface works with the original test host in
-this branch. Registration on the distributed server currently returns
-`INNESTO_BREAK_UNAVAILABLE`. In-game verification is tracked in
-[issue #3](https://github.com/ImJstNickDev/Innesto/issues/3).
+An Innesto version adapter connects a block-break decision inside the simulation
+to mod listeners. The simulation checks a proposed edit before removing the
+block, dropping an item or confirming success to the player.
+
+The draft targets Openworld a1.2.10 on Linux x86-64. It works in the adapted
+native test executable. The distributed server still returns
+`INNESTO_BREAK_UNAVAILABLE` because its decision site has yet to be connected.
+[Issue #3](https://github.com/ImJstNickDev/Innesto/issues/3) tracks in-game acceptance.
 
 ## Write a listener
 
@@ -43,7 +45,7 @@ later listener may still deny.
 | Registration result | Meaning |
 | --- | --- |
 | `INNESTO_BREAK_REGISTERED` | Innesto retains this callback for the process lifetime. |
-| `INNESTO_BREAK_UNAVAILABLE` | The running host has no adapter for this event. |
+| `INNESTO_BREAK_UNAVAILABLE` | A version adapter did not attach this decision site during startup. |
 | `INNESTO_BREAK_INVALID` | The listener pointer is null. |
 | `INNESTO_BREAK_CLOSED` | Registration was attempted outside initialization on the loader thread, or from another thread. |
 | `INNESTO_BREAK_NO_MEMORY` | The loader could not retain this listener. |
@@ -73,16 +75,27 @@ Audit records each attempt. Guard vetoes attempts where `x == 0`.
 | Allowed, followed by a retry on the empty position | Block removed, one drop | One success, block absent |
 | Vetoed after predicting removal | Block intact, zero drops | Block restored, zero successes |
 
-## Connect and verify a simulation host
+## How the decision reaches a mod
 
-The source-level adapter in `src/block_break_host.h` receives the dispatcher
-during startup, before `main`. Its setter must save the callback in storage
-usable at that point. On the simulation thread, the host validates the
-player's request and current block, then calls the dispatcher with the block
-coordinates. A pass lets the normal break proceed once. On veto the host must
-leave the block in place, suppress the drop and successful-break notification,
-and send the authoritative block state if the client predicted removal. The
-fixture exercises that sequence with an in-memory client view.
+The loader supplies `innesto_adapter_attach_before_block_break_v1` to the
+version adapter. The adapter owns the call at the decision site and attaches
+it at startup. Innesto closes attachment before opening any mod libraries.
+An attached site can dispatch to listeners after all mod initializers succeed.
+The game's executable can keep its gameplay functions private.
+
+The tests build two executables from the same simulation object files. One
+runs its original block rule. The other links an adapter at that internal
+rule. The original rule runs first, so an attempt to break an already empty
+position never reaches the listeners. For a valid attempt, the adapter asks
+Innesto for a decision before the simulation edits the block. A pass continues
+the normal action. On veto the fixture preserves the block and corrects the
+predicted state in its modeled client.
+
+## Verify the game integration
+
+A live control on the dedicated server confirmed one ordinary break, one
+drop and one matching item collected. That run used startup-only mods. The
+adapter used in the tests is specific to the test simulation.
 
 Acceptance on Openworld requires a connected player and a verified adapter
 at that decision. Place two equivalent blocks that normally drop one item,
