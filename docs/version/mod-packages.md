@@ -107,9 +107,10 @@ Here is the installed `observer/innesto.mod.json`.
 | `api` | Integer `1` selects the original C entrypoint. Integer `2` selects the [context entrypoint](environments.md#get-the-mod-context). |
 | `environment` | `"client"`, `"server"` or `"shared"` selects eligible [physical environments](environments.md). |
 | `entrypoint` | Relative path to a regular shared library inside the package. Paths may use subdirectories and must stay inside the package without any `..` components. The library must export its own [C initialization function](native-initialization.md#write-the-entrypoint). |
+| `content` | Optional [terrain content registration](terrain-materials.md) for a shared mod. |
 | `depends` | Optional object mapping required mod IDs to `"*"` (any installed version) or an exact version such as `"1.0.0"`. |
 
-Use one manifest per immediate subdirectory. Every field except `depends` is
+Use one manifest per immediate subdirectory. Every field except `depends` and `content` is
 required. Loose files at the top level are ignored. Unknown manifest fields
 and duplicate JSON keys are errors. Choose installation paths without literal
 dynamic linker tokens such as `$ORIGIN`, `$LIB` or `${PLATFORM}`. Those tokens

@@ -5,6 +5,7 @@
 #include "adapters/a1_2_10/simulation.h"
 
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <link.h>
 #include <stdio.h>
@@ -74,6 +75,15 @@ static struct mod *consume_launch_context(void)
     int list = inherited_fd("INNESTO_MOD_LIST_FD");
     if (loader == list) {
         startup_error("loader and mod list require separate descriptors");
+    }
+    if (getenv("INNESTO_WORLD_LEASE_FD")) {
+        int lease = inherited_fd("INNESTO_WORLD_LEASE_FD");
+        // Keep the lease in this game even if its launcher exits. An exec'd
+        // helper must not retain it after the game itself stops.
+        if (lease == loader || lease == list || fcntl(lease, F_SETFD, FD_CLOEXEC) < 0) {
+            startup_error("invalid world lease descriptor");
+        }
+        unsetenv("INNESTO_WORLD_LEASE_FD");
     }
 
     // Restore the caller's preload environment before dlopen can run constructors.

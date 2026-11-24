@@ -14,7 +14,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
 sys.path.insert(0, str(TOOLS))
-from innesto_packages import MANIFEST, SelectedMod, discover_mods
+from innesto_packages import MANIFEST, SelectedMod, discover_mods, select_packages
 
 LAUNCHER = TOOLS / "innesto-run"
 
@@ -47,6 +47,96 @@ class PackageTests(unittest.TestCase):
             discover_mods(self.mods)
         for message in messages:
             self.assertIn(message, str(caught.exception))
+
+    def terrain_package(self, name, folder=None):
+        content = {"version": 1, "assets": "assets",
+                   "terrain": [{"id": f"{name}:ore", "texture": "tiles/ore.png"}]}
+        library = self.package(name, folder=folder, environment="shared", content=content)
+        directory = library.parent.parent
+        tile = directory / "assets/tiles/ore.png"
+        tile.parent.mkdir(parents=True)
+        tile.touch()
+        return directory, tile
+
+    def test_shared_terrain_belongs_to_its_package_on_both_sides(self):
+        _, second_tile = self.terrain_package("zinc", "00-first")
+        first, first_tile = self.terrain_package("copper", "99-last")
+        first_tile.rename(first_tile.with_name("veined.png"))
+        first_tile.symlink_to("veined.png")
+        manifest = first / MANIFEST
+        data = json.loads(manifest.read_text())
+        data["content"]["terrain"].append({"id": "copper:alloy_2-a", "texture": "tiles/ore.png"})
+        manifest.write_text(json.dumps(data))
+        self.package("legacy")
+        for side in ("client", "server"):
+            mods = select_packages(self.mods, side)
+            materials = {mod.mod_id: [(item.id, item.texture) for item in mod.terrain] for mod in mods}
+            expected = {"copper": [("copper:ore", first_tile.resolve()),
+                                   ("copper:alloy_2-a", first_tile.resolve())],
+                        "zinc": [("zinc:ore", second_tile)]}
+            if side == "server":
+                expected["legacy"] = []
+            self.assertEqual(materials, expected)
+            self.assertTrue(all(isinstance(mod.terrain, tuple) for mod in mods))
+
+    def test_content_schema_and_material_identifiers(self):
+        directory, _ = self.terrain_package("copper")
+        manifest = directory / MANIFEST
+        base = json.loads(manifest.read_text())
+        content = base["content"]
+        tile = content["terrain"][0]
+        invalid = [
+            (None, "content"), ({}, "version"), ({**content, "version": True}, "version"),
+            ({**content, "version": 1.0}, "version"), ({**content, "version": 2}, "version"),
+            ({**content, "unexpected": 1}, "unexpected"),
+            ({"version": 1, "terrain": [tile]}, "assets"),
+            ({"version": 1, "assets": "assets"}, "terrain"),
+            ({**content, "terrain": {}}, "terrain"),
+            ({**content, "terrain": [None]}, "terrain"),
+            ({**content, "terrain": [{"id": "copper:ore"}]}, "texture"),
+            ({**content, "terrain": [{**tile, "other": 3}]}, "other"),
+            ({**content, "terrain": [tile, tile]}, "duplicate"),
+        ]
+        for material_id in ("ore", "other:ore", "copper:", "copper:UP", "copper:1ore",
+                            "copper:ore/one", "copper:..", "copper:x:y", "copper:é", None):
+            invalid.append(({**content, "terrain": [{**tile, "id": material_id}]}, "id"))
+        for value, message in invalid:
+            with self.subTest(value=value):
+                manifest.write_text(json.dumps({**base, "content": value}))
+                self.refused("copper", message)
+        for side in ("server", "client"):
+            with self.subTest(side=side):
+                manifest.write_text(json.dumps({**base, "environment": side}))
+                self.refused("shared")
+        nested_duplicate = json.dumps(base).replace('"texture":', '"texture": "first.png", "texture":')
+        manifest.write_text(nested_duplicate)
+        self.refused("duplicate key", "texture")
+
+    def test_asset_directory_and_texture_confinement(self):
+        directory, tile = self.terrain_package("copper")
+        manifest = directory / MANIFEST
+        base = json.loads(manifest.read_text())
+        content = base["content"]
+        (directory / "assets/linked").symlink_to(directory / "lib", target_is_directory=True)
+        (directory / "other-assets").symlink_to(self.scratch)
+        (directory / "root-alias").symlink_to(directory)
+        (self.scratch / "external.png").touch()
+        (tile.parent / "external.png").symlink_to(self.scratch / "external.png")
+        for field, paths in (
+            ("assets", [None, "", ".", "root-alias", "absent", "assets/tiles/ore.png",
+                        "../copper/assets", str(tile.parent), "other-assets"]),
+            ("texture", [None, "", "absent.png", "tiles", "tiles/../tiles/ore.png",
+                         str(tile), "linked/module.so", "tiles/external.png"]),
+        ):
+            for path in paths:
+                with self.subTest(field=field, path=path):
+                    bad = dict(content)
+                    if field == "assets":
+                        bad[field] = path
+                    else:
+                        bad["terrain"] = [{"id": "copper:ore", "texture": path}]
+                    manifest.write_text(json.dumps({**base, "content": bad}))
+                    self.refused("copper", field)
 
     def test_guide_contains_the_installed_observer_manifest(self):
         source = (ROOT / "docs/version/mod-packages.md").read_text(encoding="utf-8")

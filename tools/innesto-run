@@ -15,7 +15,8 @@ import stat
 import struct
 import sys
 
-from innesto_packages import SelectedMod, select_packages
+from innesto_packages import SelectedMod, select_packages, unique_keys
+from innesto_terrain import start as start_with_terrain
 
 
 ET_EXEC = 2
@@ -27,7 +28,7 @@ LOADER_TOKEN = re.compile(r"\$(?:\{(?:ORIGIN|LIB|PLATFORM)\}|(?:ORIGIN|LIB|PLATF
 
 def read_profile(path):
     with path.open(encoding="utf-8") as stream:
-        data = json.load(stream)
+        data = json.load(stream, object_pairs_hook=unique_keys)
     if not isinstance(data, dict):
         raise ValueError("target profile must be an object")
     if (data.get("version"), data.get("platform")) != ("a1.2.10", "linux-x86_64"):
@@ -41,7 +42,7 @@ def read_profile(path):
     environment = data.get("environment", "server")
     if environment not in ("client", "server"):
         raise ValueError("target environment must be 'client' or 'server'")
-    return executable, digest.lower(), environment
+    return executable, digest.lower(), environment, data
 
 
 def elf_segments(stream):
@@ -116,7 +117,7 @@ def mod_list(environment, verified_digest, mods):
 def run(args):
     if sys.platform != "linux" or platform.machine() != "x86_64":
         raise ValueError("unsupported target platform")
-    executable, expected_digest, environment = read_profile(args.profile)
+    executable, expected_digest, environment, profile = read_profile(args.profile)
     # The executable descriptor stays open from validation through execve.
     with open(executable, "rb") as target:
         elf_type, segments = elf_segments(target)
@@ -150,10 +151,14 @@ def run(args):
             # with one or more of stdin, stdout and stderr closed.
             fd = fcntl.fcntl(loader.fileno(), fcntl.F_DUPFD_CLOEXEC, 3)
             with os.fdopen(fd, "rb") as inherited, mod_list(environment, verified_digest, mods) as plan:
-                launch_target(target, executable, inherited, plan, args.target_args)
+                def launch(image, path, arguments, world_lease=None):
+                    launch_target(image, path, inherited, plan, arguments, world_lease)
+
+                return start_with_terrain(target, executable, verified_digest, environment,
+                                         mods, profile, args.target_args, launch, args.terrain_peer)
 
 
-def launch_target(target, executable, inherited, plan, arguments):
+def launch_target(target, executable, inherited, plan, arguments, world_lease=None):
     fd = inherited.fileno()
     preload = f"/proc/self/fd/{fd}"
     with open(preload, "rb") as proc_entry:
@@ -170,15 +175,36 @@ def launch_target(target, executable, inherited, plan, arguments):
     env["INNESTO_INIT_PID"] = str(os.getpid())
     env.pop("INNESTO_MOD_PATH", None)
     env["INNESTO_MOD_LIST_FD"] = str(plan.fileno())
+    if world_lease is None:
+        env.pop("INNESTO_WORLD_LEASE_FD", None)
+    else:
+        env["INNESTO_WORLD_LEASE_FD"] = str(world_lease)
+        os.set_inheritable(world_lease, True)
     os.set_inheritable(fd, True)
     os.set_inheritable(plan.fileno(), True)
     os.execve(target.fileno(), [executable, *arguments], env)
 
 
 def main():
+    if sys.argv[1:2] == ["--terrain-reference"]:
+        reference = argparse.ArgumentParser(description="Print private terrain pins from a trusted stock installation and stock server.")
+        reference.add_argument("--terrain-reference", type=Path, metavar="EXECUTABLE", required=True)
+        reference.add_argument("--dashboard-host", default="127.0.0.1")
+        reference.add_argument("--dashboard-port", required=True, type=int)
+        settings = reference.parse_args()
+        from adapters.a1_2_10 import terrain, terrain_peer
+        try:
+            stock = terrain.original_pack(settings.terrain_reference.resolve(strict=True))
+            pins = {"terrainPackSha256": terrain.stock_fingerprint(stock),
+                    "terrainBaseCount": terrain_peer.stock_count(settings.dashboard_host, settings.dashboard_port)}
+        except (OSError, ValueError) as exc:
+            reference.exit(1, f"innesto-run: {exc}\n")
+        print(json.dumps(pins, indent=2))
+        return 0
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", required=True, type=Path, help="private trusted target profile")
     parser.add_argument("--loader", required=True, type=Path, help="Innesto shared library")
+    parser.add_argument("--terrain-peer", metavar="HOST:PORT", help="preflight this terrain server before opening the client menu")
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--mod", type=Path, help="one mod shared library")
     source.add_argument("--mods-dir", type=Path, help="directory containing unpacked mod packages")
@@ -187,7 +213,7 @@ def main():
     if args.target_args[:1] == ["--"]:
         args.target_args = args.target_args[1:]
     try:
-        run(args)
+        return run(args)
     except OSError as exc:
         parser.exit(1, f"innesto-run: {exc.strerror}\n")
     except ValueError as exc:
@@ -195,4 +221,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
