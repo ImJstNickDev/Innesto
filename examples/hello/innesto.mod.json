@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "hello",
+  "version": "1.0.0",
+  "game": "a1.2.10",
+  "api": 1,
+  "environment": "server",
+  "entrypoint": "innesto-hello.so"
+}

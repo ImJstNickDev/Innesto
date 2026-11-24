@@ -1,9 +1,9 @@
 # Native mod initialization
 
 The development branch for **Openworld a1.2.10 on Linux x86-64** can start
-a local dedicated server with one explicitly selected native mod. The
-bootstrap calls the mod once during process startup, before the server
-enters `main`. At this point the mod can initialize its own state. Game
+a local dedicated server with [installed mod packages](mod-packages.md) or
+one explicitly selected library. The bootstrap calls each mod once during
+process startup, before the server enters `main`. A mod can initialize its own state here. Game
 objects and gameplay callbacks require later lifecycle support.
 
 ## Build the loader and example
@@ -41,8 +41,8 @@ int innesto_mod_init_v1(void)
 The call runs synchronously on the startup thread. Returning zero allows
 startup to continue. A missing entrypoint or a nonzero return stops
 startup with an error. The library stays loaded for the lifetime of the
-process. The loader calls one selected mod in this increment. A native mod
-runs with the same permissions as the server, so select a build you trust.
+process. A native mod runs with the same permissions as the server, so select
+a build you trust.
 
 ## Start a private target
 
@@ -75,6 +75,7 @@ innesto_root=$(pwd -P)
 )
 ```
 
+Use a library path free of literal glibc tokens such as `$ORIGIN` or `$LIB`.
 Append the server's usual arguments after `--`. The example emits
 `Innesto hello initialized (pid=N)` to standard error. Compare `N` with
 the running server PID and check that the server reaches its ready state.

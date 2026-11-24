@@ -12,7 +12,8 @@ int main(int argc, char **argv)
     }
     fflush(stdout);
     if (getenv("INNESTO_INIT_PID") || getenv("INNESTO_MOD_PATH") ||
-        getenv("INNESTO_PREVIOUS_PRELOAD") || getenv("INNESTO_LOADER_FD")) {
+        getenv("INNESTO_PREVIOUS_PRELOAD") || getenv("INNESTO_LOADER_FD") ||
+        getenv("INNESTO_MOD_LIST_FD")) {
         return 91;
     }
     if (argc == 2 && strcmp(argv[1], "--reexec") == 0) {

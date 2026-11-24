@@ -1,9 +1,10 @@
-"""Exercise the public launcher with original native fixtures and an independent mod."""
+"""Exercise the public launcher with native fixtures and independent mod packages."""
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -21,28 +22,117 @@ class NativeInitialization(unittest.TestCase):
         cls.temp = tempfile.TemporaryDirectory(prefix="innesto test ", dir=BUILD)
         cls.addClassCleanup(cls.temp.cleanup)
         cls.work = Path(cls.temp.name)
-        project = cls.work / "standalone example"
-        subprocess.run(["cmake", "-S", ROOT / "examples/hello", "-B", project,
-                        f"-DCMAKE_C_COMPILER={CC}", f"-DINNESTO_INCLUDE_DIR={ROOT / 'include'}"],
-                       check=True)
-        subprocess.run(["cmake", "--build", project], check=True)
-        cls.mod = project / "innesto-hello.so"
+        cls.packages = cls.work / "installed mods"
+        for name in ("hello", "observer"):
+            project = cls.work / f"standalone {name}"
+            subprocess.run(["cmake", "-S", ROOT / "examples" / name, "-B", project,
+                            f"-DCMAKE_C_COMPILER={CC}", f"-DINNESTO_INCLUDE_DIR={ROOT / 'include'}"],
+                           check=True)
+            subprocess.run(["cmake", "--build", project], check=True)
+            subprocess.run(["cmake", "--install", project, "--prefix", cls.packages], check=True)
+        cls.mod = cls.packages / "hello/innesto-hello.so"
         host = BUILD / "innesto-test-host"
         cls.profile = {"version": "a1.2.10", "platform": "linux-x86_64",
                        "executable": str(host), "sha256": hashlib.sha256(host.read_bytes()).hexdigest()}
 
-    def launch(self, *args, profile=None, mod=None, loader=None, prior=None, pass_fds=()):
+    def launch(self, *args, profile=None, mod=None, mods_dir=None, loader=None, prior=None, pass_fds=()):
         config = self.work / "fixture.json"
         config.write_text(json.dumps(self.profile if profile is None else profile))
         env = {k: v for k, v in os.environ.items() if not k.startswith("INNESTO_") and k != "LD_PRELOAD"}
+        env["INNESTO_MOD_PATH"] = "stale single-mod context"
         if prior:
             env["LD_PRELOAD"] = str(prior)
+        selected = ["--mods-dir", mods_dir] if mods_dir else ["--mod", mod or self.mod]
         with subprocess.Popen([LAUNCHER, "--profile", config, "--loader", loader or BUILD / "innesto-bootstrap.so",
-                               "--mod", mod or self.mod, "--", *args],
+                               *selected, "--", *args],
                               cwd=self.work, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                               text=True, pass_fds=pass_fds) as proc:
             stdout, stderr = proc.communicate(timeout=10)
             return proc.returncode, proc.pid, stdout, stderr
+
+    def copy_packages(self):
+        directory = tempfile.TemporaryDirectory(dir=self.work)
+        self.addCleanup(directory.cleanup)
+        return shutil.copytree(self.packages, Path(directory.name) / "mods")
+
+    def test_packages_initialize_in_dependency_order_and_can_be_removed(self):
+        packages = self.copy_packages()
+        for expected in (["hello", "observer"], ["hello"], []):
+            with self.subTest(expected=expected):
+                status, pid, stdout, stderr = self.launch("--reexec", mods_dir=packages)
+                self.assertEqual(status, 0, stderr)
+                self.assertIn("argument=child", stdout)
+                markers = re.findall(r"Innesto (\w+) initialized \(pid=(\d+)\)", stderr)
+                self.assertEqual(markers, [(name, str(pid)) for name in expected])
+                if expected:
+                    shutil.rmtree(packages / expected[-1])
+
+    def test_invalid_later_manifest_prevents_all_initializers(self):
+        packages = self.copy_packages()
+        manifest = packages / "observer/innesto.mod.json"
+        manifest.write_text(json.dumps({**json.loads(manifest.read_text()), "schemaVersion": 42}))
+        status, _, stdout, stderr = self.launch(mods_dir=packages)
+        self.assertNotEqual(status, 0)
+        self.assertNotIn("host pid=", stdout)
+        self.assertNotIn("initialized (pid=", stderr)
+        self.assertIn("schema", stderr.lower())
+
+    def test_missing_later_entrypoint_prevents_all_initializers(self):
+        packages = self.copy_packages()
+        mod = packages / "observer/innesto-observer.so"
+        shutil.copyfile(BUILD / "innesto-test-prior.so", mod)
+        status, _, stdout, stderr = self.launch(mods_dir=packages)
+        self.assertNotEqual(status, 0)
+        self.assertNotIn("host pid=", stdout)
+        self.assertNotIn("initialized (pid=", stderr)
+        self.assertIn(str(mod), stderr)
+        self.assertIn("innesto_mod_init_v1", stderr)
+
+    def test_nonzero_later_initializer_stops_the_remaining_mods_and_host(self):
+        packages = self.copy_packages()
+        tail = shutil.copytree(packages / "observer", packages / "tail")
+        manifest = tail / "innesto.mod.json"
+        manifest.write_text(json.dumps({**json.loads(manifest.read_text()),
+                                        "id": "tail", "depends": {"observer": "*"}}))
+        mod = packages / "observer/innesto-observer.so"
+        shutil.copyfile(BUILD / "innesto-test-reject.so", mod)
+        status, pid, stdout, stderr = self.launch(mods_dir=packages)
+        self.assertNotEqual(status, 0)
+        self.assertNotIn("host pid=", stdout)
+        self.assertEqual(stderr.count(f"Innesto hello initialized (pid={pid})"), 1)
+        self.assertNotIn("Innesto observer initialized", stderr)
+        self.assertIn(str(mod), stderr)
+        self.assertIn("returned 27", stderr)
+
+    def test_native_handoff_closes_fds_before_mod_code_and_requires_complete_paths(self):
+        # The test owns the handoff so it can supply a malformed plan and identify
+        # the exact descriptors that must already be closed in the mod constructor.
+        mod = self.work / os.fsdecode(b"context \n:\xff.so")
+        subprocess.run([CC, "-shared", "-fPIC", "-I", ROOT / "include",
+                        ROOT / "tests/launch_context.c", "-o", mod], check=True)
+        payload = os.fsencode(mod)
+        child = """\
+import os, sys
+host, loader, plan = sys.argv[1:]
+os.environ.update(LD_PRELOAD=f"/proc/self/fd/{loader}", INNESTO_INIT_PID=str(os.getpid()),
+                  INNESTO_LOADER_FD=loader, INNESTO_MOD_LIST_FD=plan,
+                  INNESTO_MOD_PATH="stale", INNESTO_PREVIOUS_PRELOAD="",
+                  TEST_INNESTO_FDS=f"{loader} {plan}")
+os.execl(host, host)
+"""
+        for handoff, valid in [(payload + b"\0", True), (payload, False), (b"relative\0", False)]:
+            with self.subTest(valid=valid, terminated=handoff.endswith(b"\0")):
+                with (BUILD / "innesto-bootstrap.so").open("rb") as loader, \
+                        tempfile.TemporaryFile(dir=self.work) as plan:
+                    plan.write(handoff)
+                    plan.seek(0)
+                    fds = (loader.fileno(), plan.fileno())
+                    result = subprocess.run([sys.executable, "-c", child, self.profile["executable"],
+                                             *map(str, fds)], pass_fds=fds, capture_output=True, timeout=5)
+                self.assertEqual(result.returncode == 0, valid, result.stderr)
+                self.assertEqual(b"host pid=" in result.stdout, valid)
+                if not valid:
+                    self.assertIn(b"NUL-terminated absolute paths", result.stderr)
 
     def test_independent_mod_initializes_once_in_the_host(self):
         status, pid, stdout, stderr = self.launch("a b", "--example-option")
