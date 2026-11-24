@@ -24,8 +24,8 @@ jobs:
           version: '0.13.9'
           python-version: '3.13'
           enable-cache: false
-      - name: Test documentation assembly
-        run: uv run --project tools/docs --locked python tools/docs/test_site.py
+      - name: Test documentation tools
+        run: uv run --project tools/docs --locked python -m unittest discover -s tools/docs
       - name: Build the full site with the proposed pages
         env:
           TARGET_BRANCH: ${{ github.base_ref || github.ref_name }}
