@@ -5,6 +5,7 @@ from http.client import HTTPConnection, HTTPException
 import json
 
 from innesto_packages import unique_keys
+from innesto_registry import provider_index
 from .terrain import check_slot_count, game_key, MAX_CATALOGUE_SIZE, MAX_PNG_BYTES, PREFIX
 
 
@@ -71,21 +72,27 @@ def stock_count(host: str, port: int) -> int:
 
 
 def peer_order(host: str, port: int, material_ids, base_count: int) -> list[str]:
-    """Resolve our own IDs into this world's contiguous native slots."""
+    return list(peer_bindings(host, port, {mid: () for mid in material_ids}, base_count))
+
+
+def peer_bindings(host, port, available, base_count):
+    """Bind one local provider to each persistent slot advertised by the server."""
     if type(base_count) is not int or base_count < 1:
         raise ValueError("invalid terrain peer stock material count")
-    by_key = {game_key(mid): mid for mid in material_ids}
-    check_slot_count(base_count, len(by_key))
-    # Rows include keys, derived labels and paths. Size the response budget from
-    # locally installed IDs so a legitimate large pack can pass preflight.
+    owners = provider_index(available)
+    by_key = {game_key(mid): mid for mid in owners}
+    check_slot_count(base_count, len(available))
     limit = CATALOGUE_LIMIT + sum(1024 + 4 * len(key) for key in by_key)
     count, reported = _catalogue(host, port, limit)
-    if count != base_count + len(by_key) or reported.keys() != by_key.keys():
+    if count != base_count + len(available) or len(reported) != len(available) or reported.keys() - by_key.keys():
         raise ValueError("terrain peer catalogue differs from the pinned material set")
     ordered = sorted(reported, key=reported.__getitem__)
     if any(reported[key] != index for index, key in enumerate(ordered, base_count)):
         raise ValueError("terrain peer material IDs overlap the pinned stock slots")
-    return [by_key[key] for key in ordered]
+    bindings = {by_key[key]: owners[by_key[key]] for key in ordered}
+    if set(bindings.values()) != set(available):
+        raise ValueError("terrain peer slots do not match the installed providers")
+    return bindings
 
 
 def verify_peer(host: str, port: int, materials: dict[str, str], base_count: int, *, initial_order=None) -> None:

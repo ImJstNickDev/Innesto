@@ -8,6 +8,7 @@ in dependency order before the host enters `main`.
 - [Build and load a mod package](mod-packages.md) to install the two example mods, write a manifest and declare dependencies.
 - [Native mod initialization](native-initialization.md) describes the public C entrypoint, the private target profile and how to launch a single library.
 - [Terrain materials](terrain-materials.md) covers shared asset packages, direct connections and world compatibility.
+- [Replace a missing terrain package](missing-terrain.md) covers explicit aliases, migration previews, full backups and recovery.
 - [Use the terrain examples in Survival](terrain-survival.md) covers harvesting, placement, the stone chisel recipe and what persists across restarts.
 - [Saved block totals](saved-block-totals.md) lets server mods read persisted player progress.
 - [Native mappings](native-mappings.md) describes exact-build function and type resolution, typed decision hooks, and the original stripped fixtures.
