@@ -1,4 +1,4 @@
-"""Read server mod packages and resolve their initialization order."""
+"""Read native mod packages and resolve their initialization order."""
 
 from dataclasses import dataclass
 import heapq
@@ -19,8 +19,18 @@ class Package:
     mod_id: str
     version: str
     depends: dict[str, str]
-    library: Path
+    entrypoint: Path
+    directory: Path
     folder: str
+    environment: str
+    api: int
+
+
+@dataclass
+class SelectedMod:
+    library: Path
+    mod_id: str
+    api: int
 
 
 def unique_keys(pairs):
@@ -36,13 +46,17 @@ def matches(pattern, value):
     return isinstance(value, str) and pattern.fullmatch(value) is not None
 
 
-def confined_file(package, relative):
-    if not isinstance(relative, str) or not relative:
-        raise ValueError("expected a nonempty relative file path")
+def relative_path(relative):
+    if not isinstance(relative, str) or not relative or "\0" in relative:
+        raise ValueError("expected a nonempty relative file path without NUL")
     path = Path(relative)
     if path.is_absolute() or ".." in path.parts:
         raise ValueError(f"path {relative!r} must be relative to the package without '..'")
-    resolved = (package / path).resolve(strict=True)
+    return path
+
+
+def confined_file(package, relative):
+    resolved = (package / relative).resolve(strict=True)
     if not resolved.is_relative_to(package) or not resolved.is_file():
         raise ValueError(f"{relative!r} must resolve to a regular file inside the package")
     return resolved
@@ -59,13 +73,14 @@ def read_package(directory, folder):
     unknown = sorted(data.keys() - REQUIRED_FIELDS - {"depends"})
     if unknown:
         raise ValueError(f"unknown field(s): {', '.join(unknown)}")
-    for key in ("schemaVersion", "api"):
-        if type(data[key]) is not int or data[key] != 1:
-            raise ValueError(f"{key} must be the integer 1")
+    if type(data["schemaVersion"]) is not int or data["schemaVersion"] != 1:
+        raise ValueError("schemaVersion must be the integer 1")
+    if type(data["api"]) is not int or data["api"] not in (1, 2):
+        raise ValueError("api must be the integer 1 or 2")
     if data["game"] != "a1.2.10":
         raise ValueError("game must be 'a1.2.10'")
-    if data["environment"] != "server":
-        raise ValueError("environment must be 'server'")
+    if data["environment"] not in ("server", "client", "shared"):
+        raise ValueError("environment must be 'client', 'server' or 'shared'")
     if not matches(MOD_ID, data["id"]):
         raise ValueError(f"id must match {MOD_ID.pattern}")
     if not matches(VERSION, data["version"]):
@@ -79,10 +94,11 @@ def read_package(directory, folder):
         if value != "*" and not matches(VERSION, value):
             raise ValueError(f"dependency {key!r} needs '*' or an exact major.minor.patch version")
     try:
-        library = confined_file(directory, data["entrypoint"])
+        entrypoint = relative_path(data["entrypoint"])
     except (ValueError, RuntimeError, OSError) as exc:
         raise ValueError(f"invalid entrypoint {data['entrypoint']!r}: {file_error(exc)}") from exc
-    return Package(data["id"], data["version"], depends, library, folder)
+    return Package(data["id"], data["version"], depends, entrypoint, directory, folder,
+                   data["environment"], data["api"])
 
 
 def file_error(exc):
@@ -101,17 +117,19 @@ def cycle_path(packages, blocked):
     return " -> ".join([*trace[positions[current]:], current])
 
 
-def ordered_libraries(packages):
+def ordered_ids(packages, installed, environment):
     remaining = {}
     dependents = {name: [] for name in packages}
     for name, package in packages.items():
         remaining[name] = len(package.depends)
         for dep, requirement in package.depends.items():
             if dep not in packages:
+                if dep in installed:
+                    raise ValueError(f"{name!r} requires {dep!r}, unavailable on {environment}")
                 raise ValueError(f"{name!r} requires missing mod {dep!r}")
-            installed = packages[dep].version
-            if requirement not in ("*", installed):
-                raise ValueError(f"{name!r} requires {dep!r} version {requirement}, found {installed}")
+            version = packages[dep].version
+            if requirement not in ("*", version):
+                raise ValueError(f"{name!r} requires {dep!r} version {requirement}, found {version}")
             dependents[dep].append(name)
 
     ready = [name for name, count in remaining.items() if count == 0]
@@ -119,7 +137,7 @@ def ordered_libraries(packages):
     ordered = []
     while ready:
         name = heapq.heappop(ready)
-        ordered.append(packages[name].library)
+        ordered.append(name)
         for dependent in dependents[name]:
             remaining[dependent] -= 1
             if remaining[dependent] == 0:
@@ -130,12 +148,13 @@ def ordered_libraries(packages):
     return ordered
 
 
-def discover_mods(root):
+def select_packages(root, environment):
+    if environment not in ("client", "server"):
+        raise ValueError("target environment must be 'client' or 'server'")
     if not root.is_dir():
         raise ValueError("--mods-dir must name an existing directory")
     root = root.resolve(strict=True)
     packages = {}
-    libraries = {}
     for candidate in sorted(root.iterdir()):
         try:
             try:
@@ -150,15 +169,33 @@ def discover_mods(root):
             if directory == root or not directory.is_relative_to(root):
                 raise ValueError("package directory resolves outside its location under --mods-dir")
             package = read_package(directory, candidate.name)
-            entry = package.library.stat()
         except (ValueError, RuntimeError, OSError) as exc:
             raise ValueError(f"{candidate.name!r}/{MANIFEST}: {file_error(exc)}") from exc
         if package.mod_id in packages:
             other = packages[package.mod_id]
             raise ValueError(f"duplicate mod id {package.mod_id!r} in {other.folder!r} and {candidate.name!r}")
+        packages[package.mod_id] = package
+
+    active = {name: package for name, package in packages.items()
+              if package.environment in ("shared", environment)}
+    libraries = {}
+    selected = []
+    for name in ordered_ids(active, packages, environment):
+        package = active[name]
+        try:
+            library = confined_file(package.directory, package.entrypoint)
+            entry = library.stat()
+        except (ValueError, RuntimeError, OSError) as exc:
+            raise ValueError(f"{package.folder!r}/{MANIFEST}: invalid entrypoint "
+                             f"{str(package.entrypoint)!r}: {file_error(exc)}") from exc
         identity = (entry.st_dev, entry.st_ino)
         if identity in libraries:
-            raise ValueError(f"{package.mod_id!r} and {libraries[identity]!r} use the same entrypoint file")
-        packages[package.mod_id] = package
-        libraries[identity] = package.mod_id
-    return ordered_libraries(packages)
+            raise ValueError(f"{name!r} and {libraries[identity]!r} use the same entrypoint file")
+        libraries[identity] = name
+        selected.append(SelectedMod(library, name, package.api))
+    return selected
+
+
+def discover_mods(root, environment="server"):
+    """Return the ordered library paths for a physical environment."""
+    return [mod.library for mod in select_packages(root, environment)]

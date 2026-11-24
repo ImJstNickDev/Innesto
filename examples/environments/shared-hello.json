@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "shared-hello",
+  "version": "1.0.0",
+  "game": "a1.2.10",
+  "api": 2,
+  "environment": "shared",
+  "entrypoint": "shared-hello.so"
+}

@@ -14,7 +14,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
 sys.path.insert(0, str(TOOLS))
-from innesto_packages import MANIFEST, discover_mods
+from innesto_packages import MANIFEST, SelectedMod, discover_mods
 
 LAUNCHER = TOOLS / "innesto-run"
 
@@ -95,7 +95,7 @@ class PackageTests(unittest.TestCase):
             "schemaVersion": [True, 1.0, 2],
             "id": ["Upper", "9sample", "foo.bar", "àbc", None],
             "version": [0, "01.2.3", "1.02.3", "1.2.03", "1.2", "1.2.3-rc", "1.2.٣"],
-            "game": ["other"], "api": [True, "1", 2], "environment": ["client"],
+            "game": ["other"], "api": [True, "1", 3], "environment": ["integrated", "both"],
             "entrypoint": [None, "", "lib/absent.so", "lib", "/absolute", "../escape"],
             "depends": [[], None], "typo": ["value"],
         }
@@ -159,12 +159,15 @@ class PackageTests(unittest.TestCase):
     def test_memfd_contains_nul_terminated_filesystem_bytes(self):
         mod_list = runpy.run_path(str(LAUNCHER))["mod_list"]
         libraries = [self.mods / os.fsdecode(b"\xff\n :module.so"), self.mods / "last.so"]
-        with mod_list(libraries) as plan:
+        mods = [SelectedMod(path, f"test{i}", i + 1) for i, path in enumerate(libraries)]
+        with mod_list("server", mods) as plan:
             self.assertGreaterEqual(plan.fileno(), 3)
             self.assertFalse(os.get_inheritable(plan.fileno()))
-            self.assertEqual(plan.read(), b"".join(os.fsencode(path) + b"\0" for path in libraries))
-        with mod_list([]) as plan:
-            self.assertEqual(plan.read(), b"")
+            self.assertEqual(plan.read(), b"Innesto/2\0server\0" + b"1\0test0\0" +
+                             os.fsencode(libraries[0]) + b"\0" + b"2\0test1\0" +
+                             os.fsencode(libraries[1]) + b"\0")
+        with mod_list("client", []) as plan:
+            self.assertEqual(plan.read(), b"Innesto/2\0client\0")
 
     def test_both_cli_modes_check_resolved_paths_for_glibc_tokens_before_launch(self):
         host = self.scratch / "host"

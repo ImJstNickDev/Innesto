@@ -110,7 +110,9 @@ class NativeInitialization(unittest.TestCase):
         mod = self.work / os.fsdecode(b"context \n:\xff.so")
         subprocess.run([CC, "-shared", "-fPIC", "-I", ROOT / "include",
                         ROOT / "tests/launch_context.c", "-o", mod], check=True)
-        payload = os.fsencode(mod)
+        header = b"Innesto/2\0server\0"
+        record = header + b"1\0\0"
+        payload = record + os.fsencode(mod)
         child = """\
 import os, sys
 host, loader, plan = sys.argv[1:]
@@ -120,7 +122,10 @@ os.environ.update(LD_PRELOAD=f"/proc/self/fd/{loader}", INNESTO_INIT_PID=str(os.
                   TEST_INNESTO_FDS=f"{loader} {plan}")
 os.execl(host, host)
 """
-        for handoff, valid in [(payload + b"\0", True), (payload, False), (b"relative\0", False)]:
+        for handoff, valid in [(payload + b"\0", True), (payload, False), (record + b"relative\0", False),
+                               (header + b"2\0\0", False), (header + b"1\0", False),
+                               (header + b"1\0-typo\0", False), (header + b"3\0", False),
+                               (b"Innesto/2\0shared\0", False), (b"Innesto/other\0", False)]:
             with self.subTest(valid=valid, terminated=handoff.endswith(b"\0")):
                 with (BUILD / "innesto-bootstrap.so").open("rb") as loader, \
                         tempfile.TemporaryFile(dir=self.work) as plan:
@@ -132,7 +137,7 @@ os.execl(host, host)
                 self.assertEqual(result.returncode == 0, valid, result.stderr)
                 self.assertEqual(b"host pid=" in result.stdout, valid)
                 if not valid:
-                    self.assertIn(b"NUL-terminated absolute paths", result.stderr)
+                    self.assertIn(b"Innesto:", result.stderr)
 
     def test_independent_mod_initializes_once_in_the_host(self):
         status, pid, stdout, stderr = self.launch("a b", "--example-option")
