@@ -11,6 +11,7 @@ import tempfile
 
 
 SHARED_PATHS = (
+    "AGENTS.md",
     "README.md",
     "CONTRIBUTING.md",
     "mkdocs.yml",
