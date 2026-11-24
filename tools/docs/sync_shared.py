@@ -92,6 +92,22 @@ def open_pr(topic, game):
     return next((pr["url"] for pr in json.loads(result) if not pr["isCrossRepository"]), None)
 
 
+def push_topic(commit, topic):
+    branch = f"refs/heads/{topic}"
+    try:
+        git("push", "origin", f"{commit}:{branch}")
+    except subprocess.CalledProcessError as push_error:
+        tracking = f"refs/remotes/origin/{topic}"
+        try:
+            git("fetch", "--no-tags", "--no-write-fetch-head", "origin", f"{branch}:{tracking}")
+        except subprocess.CalledProcessError as fetch_error:
+            raise push_error from fetch_error
+        # Concurrent maintainers can produce the same change with different authors or timestamps.
+        details = ("show", "-s", "--format=%T%n%P%n%B")
+        if git(*details, tracking) != git(*details, commit):
+            raise
+
+
 def sync(game, source):
     base = git("rev-parse", "--verify", f"refs/remotes/origin/{game}^{{commit}}").decode().strip()
     changed = shared_diff(base, source)
@@ -129,7 +145,7 @@ def sync(game, source):
         commit = git("commit-tree", tree, *parents, data=message.encode()).decode().strip()
         if shared_diff(commit, source):
             raise ValueError(f"Shared-path verification failed for {game}.")
-        git("push", "origin", f"{commit}:refs/heads/{topic}")
+        push_topic(commit, topic)
 
     url = open_pr(topic, game)
     if not url:
@@ -139,9 +155,14 @@ def sync(game, source):
             "Verification: the sync command compared the shared Git trees before pushing. "
             "The documentation and native checks run on the pull request."
         )
-        url = github_pr("create", "--base", game, "--head", topic,
-                        "--title", f"docs: sync shared documentation for {game}",
-                        "--body-file", "-", data=body.encode()).decode().strip()
+        try:
+            url = github_pr("create", "--base", game, "--head", topic,
+                            "--title", f"docs: sync shared documentation for {game}",
+                            "--body-file", "-", data=body.encode()).decode().strip()
+        except subprocess.CalledProcessError:
+            url = open_pr(topic, game)
+            if not url:
+                raise
     print(f"{game}: {url}", flush=True)
 
 
