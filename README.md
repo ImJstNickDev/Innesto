@@ -10,13 +10,12 @@
   <a href="https://github.com/ImJstNickDev/Innesto/milestone/1">First release milestone</a>
 </p>
 
-Innesto is an independent mod loader and API project for Openworld. The loader
-will initialize mods inside the game process. The API will give authors a shared
-way to change game behavior and define how multiple mods interact.
+Innesto is an independent mod loader and API project for Openworld. This development branch loads one explicitly selected native mod inside a local
+dedicated server process.
 
-The first development target is **Openworld a1.2.10 on Linux x86-64**. Work is at
-the repository foundation stage. The first playable milestone is a separately
-built mod that can veto a block break through the public API.
+**Target: Openworld a1.2.10 on Linux x86-64.** Follow the
+[native initialization guide](docs/native-initialization.md) to build the loader
+and an independent example, run the fixture tests and launch a private target.
 
 ## Work on the documentation
 

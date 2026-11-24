@@ -8,7 +8,7 @@ API.
 
 | Openworld | Platform | Innesto status |
 | --- | --- | --- |
-| a1.2.10 | Linux x86-64 | Initial development target |
+| a1.2.10 | Linux x86-64 | [Single-mod initialization verified](native-initialization.md) |
 
 The [first release milestone](https://github.com/ImJstNickDev/Innesto/milestone/1)
 tracks native mod initialization, mod discovery and a cancellable block-break
