@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "tidepool",
+  "version": "1.0.0",
+  "game": "a1.2.10",
+  "api": 1,
+  "environment": "shared",
+  "entrypoint": "tidepool.so",
+  "content": {
+    "version": 1,
+    "assets": "assets",
+    "terrain": [
+      {"id": "tidepool:lagoon", "texture": "lagoon.png"}
+    ]
+  }
+}

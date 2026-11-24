@@ -84,6 +84,10 @@ if(BUILD_TESTING)
     add_test(NAME environments COMMAND "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/tests/environments.py" "$<TARGET_FILE_DIR:innesto-bootstrap>"
         "${CMAKE_C_COMPILER}")
+    add_test(NAME terrain-pack COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/test_terrain_adapter.py")
+    add_test(NAME terrain-peer COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/test_terrain_peer.py")
+    add_test(NAME terrain-launch COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/terrain_launch.py"
+        "$<TARGET_FILE_DIR:innesto-bootstrap>")
     add_test(NAME mod-packages COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/test_packages.py")
     add_test(NAME launch-validation COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/test_launch.py")
 endif()

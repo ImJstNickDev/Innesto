@@ -14,6 +14,12 @@ MANIFEST = "innesto.mod.json"
 REQUIRED_FIELDS = {"schemaVersion", "id", "version", "game", "api", "environment", "entrypoint"}
 
 
+@dataclass(frozen=True)
+class TerrainMaterial:
+    id: str
+    texture: Path
+
+
 @dataclass
 class Package:
     mod_id: str
@@ -24,6 +30,7 @@ class Package:
     folder: str
     environment: str
     api: int
+    terrain: tuple[TerrainMaterial, ...]
 
 
 @dataclass
@@ -31,6 +38,7 @@ class SelectedMod:
     library: Path
     mod_id: str
     api: int
+    terrain: tuple[TerrainMaterial, ...] = ()
 
 
 def unique_keys(pairs):
@@ -55,24 +63,60 @@ def relative_path(relative):
     return path
 
 
-def confined_file(package, relative):
-    resolved = (package / relative).resolve(strict=True)
-    if not resolved.is_relative_to(package) or not resolved.is_file():
-        raise ValueError(f"{relative!r} must resolve to a regular file inside the package")
+def confined_file(root, relative, label="package"):
+    resolved = (root / relative).resolve(strict=True)
+    if not resolved.is_relative_to(root) or not resolved.is_file():
+        raise ValueError(f"{str(relative)!r} must resolve to a regular file inside the {label}")
     return resolved
+
+
+def check_fields(data, name, required, optional=frozenset()):
+    if not isinstance(data, dict):
+        raise ValueError(f"{name} must be a JSON object")
+    missing = sorted(required - data.keys())
+    if missing:
+        raise ValueError(f"{name}: missing field(s): {', '.join(missing)}")
+    unknown = sorted(data.keys() - required - optional)
+    if unknown:
+        raise ValueError(f"{name}: unknown field(s): {', '.join(unknown)}")
+
+
+def read_terrain(content, directory, mod_id):
+    check_fields(content, "content", {"version", "assets", "terrain"})
+    if type(content["version"]) is not int or content["version"] != 1:
+        raise ValueError("content.version must be the integer 1")
+    if not isinstance(content["terrain"], list):
+        raise ValueError("content.terrain must be an array")
+    try:
+        assets = (directory / relative_path(content["assets"])).resolve(strict=True)
+        if assets == directory or not assets.is_relative_to(directory) or not assets.is_dir():
+            raise ValueError("expected a subdirectory inside the package")
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise ValueError(f"invalid content.assets: {file_error(exc)}") from exc
+
+    materials = {}
+    prefix = mod_id + ":"
+    for index, item in enumerate(content["terrain"]):
+        field = f"content.terrain[{index}]"
+        check_fields(item, field, {"id", "texture"})
+        material_id = item["id"]
+        if (not isinstance(material_id, str) or not material_id.startswith(prefix)
+                or not matches(MOD_ID, material_id[len(prefix):])):
+            raise ValueError(f"{field}.id must be {prefix}{MOD_ID.pattern}")
+        if material_id in materials:
+            raise ValueError(f"duplicate terrain id {material_id!r}")
+        try:
+            texture = confined_file(assets, relative_path(item["texture"]), "assets directory")
+        except (ValueError, OSError, RuntimeError) as exc:
+            raise ValueError(f"invalid texture for {material_id!r}: {file_error(exc)}") from exc
+        materials[material_id] = TerrainMaterial(material_id, texture)
+    return tuple(materials.values())
 
 
 def read_package(directory, folder):
     manifest = confined_file(directory, MANIFEST)
     data = json.loads(manifest.read_text(encoding="utf-8"), object_pairs_hook=unique_keys)
-    if not isinstance(data, dict):
-        raise ValueError("expected a JSON object")
-    missing = sorted(REQUIRED_FIELDS - data.keys())
-    if missing:
-        raise ValueError(f"missing field(s): {', '.join(missing)}")
-    unknown = sorted(data.keys() - REQUIRED_FIELDS - {"depends"})
-    if unknown:
-        raise ValueError(f"unknown field(s): {', '.join(unknown)}")
+    check_fields(data, "manifest", REQUIRED_FIELDS, {"depends", "content"})
     if type(data["schemaVersion"]) is not int or data["schemaVersion"] != 1:
         raise ValueError("schemaVersion must be the integer 1")
     if type(data["api"]) is not int or data["api"] not in (1, 2):
@@ -97,8 +141,13 @@ def read_package(directory, folder):
         entrypoint = relative_path(data["entrypoint"])
     except (ValueError, RuntimeError, OSError) as exc:
         raise ValueError(f"invalid entrypoint {data['entrypoint']!r}: {file_error(exc)}") from exc
+    terrain = ()
+    if "content" in data:
+        if data["environment"] != "shared":
+            raise ValueError("content requires environment 'shared'")
+        terrain = read_terrain(data["content"], directory, data["id"])
     return Package(data["id"], data["version"], depends, entrypoint, directory, folder,
-                   data["environment"], data["api"])
+                   data["environment"], data["api"], terrain)
 
 
 def file_error(exc):
@@ -192,7 +241,7 @@ def select_packages(root, environment):
         if identity in libraries:
             raise ValueError(f"{name!r} and {libraries[identity]!r} use the same entrypoint file")
         libraries[identity] = name
-        selected.append(SelectedMod(library, name, package.api))
+        selected.append(SelectedMod(library, name, package.api, package.terrain))
     return selected
 
 
