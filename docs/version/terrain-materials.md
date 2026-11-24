@@ -45,7 +45,7 @@ Set `content.version` to `2` to select a material family. You can also set the t
 
 The server applies these properties to placed voxels. It counted an elevated rock pad as the terrain surface, looked through an equally sized plant pad to the stone below and reported liquid depth for a liquid pad. Suspended rock stayed in place. Plant voxels placed above open air disappeared and could be placed again in the same cells. The contract provides the game's family behavior. Growth rules, flow, drop tables and new recipes have no registration fields in this version.
 
-`tileMeters` accepts `0.25`, `0.5`, `1`, `1.5`, `2` or `2.5`. The default is `1`. The dedicated server reported each selected value. In a connected client, identical checker patterns at `0.5` and `2` repeated at the same spacing. Treat this field as catalogue metadata. Version 1 materials keep their original rock definition and value of `1`. Writing those same defaults in version 2 preserves the material's compatibility with its existing world.
+`tileMeters` accepts `0.25`, `0.5`, `1`, `1.5`, `2` or `2.5`. The default is `1`. The dedicated server reports this value in its catalogue. Its 3D dashboard map repeats the texture four times across a metre at `0.25` and once at `1`. The connected game client showed the same checker spacing at `0.5` and `2` in a side-by-side test. Version 1 materials keep their original rock definition and value of `1`. Writing those same defaults in version 2 preserves the material's compatibility with its existing world.
 
 ### Name a material in the player's language
 
