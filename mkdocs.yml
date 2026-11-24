@@ -12,9 +12,13 @@ theme:
   favicon: assets/innesto.svg
 nav:
   - Innesto: index.md
-  - Native initialization: native-initialization.md
+  - Openworld a1.2.10:
+      - Overview: version/index.md
+      - Native initialization: version/native-initialization.md
   - Development: development.md
   - API conventions: api-conventions.md
+not_in_nav: |
+  /native-initialization.md
 validation:
   nav:
     omitted_files: warn
