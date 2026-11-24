@@ -119,3 +119,11 @@ once. Check the server's block and drop state and the player's view and
 success feedback on both attempts. Recheck the vetoed position after
 reconnecting. Listener logs identify the attempts; the world and client
 observations establish what actually happened.
+
+For the persistence check, keep stopped copies of the world before and
+after the test and compare the edited terrain separately from player
+inventory and counters. In a restart control, the game's verifier read
+the saved edited column and found identical cells after the restarts.
+Three other simulation-state files had changed. A disposable copy with
+the edited region omitted failed verification. A saved-world comparison
+covers persistence; the reconnect check still requires the player's view.
