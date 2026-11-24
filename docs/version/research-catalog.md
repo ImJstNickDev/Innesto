@@ -2,6 +2,8 @@
 
 The private research catalogue answers three questions for an exact game build. Which interface was observed? Which evidence supports that interpretation? What still stops an adapter from using it? The launcher and mod API have no dependency on the catalogue.
 
+The [lifecycle and gameplay study](native-lifecycle-study.md) reports revision 6, including execution phases, material rows, occupied stores and the remaining requirements for each gameplay issue.
+
 ## Find a result or a missing prerequisite
 
 Run the commands below from the checkout. The evidence root is the directory against which the private snapshot's relative paths were recorded. SQLite and Python 3.11 or later are sufficient to query the catalogue.

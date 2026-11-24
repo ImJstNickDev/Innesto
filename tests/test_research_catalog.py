@@ -114,6 +114,25 @@ class Catalogue(unittest.TestCase):
         self.assertEqual(json.loads(self.run_cli("search", self.db, "Correction"))[0]["state"], "verified")
         self.assertEqual(json.loads(self.run_cli("needs", self.db, "--issue", "3"))[0]["key"], "owned.rule")
 
+    def test_lifecycle_and_client_observations_are_searchable_by_subsystem(self):
+        self.ingest()
+        self.snapshot["revision"] = 2
+        self.snapshot["targets"]["client"] = "b" * 64
+        domains = {"lifecycle": "dedicated", "rendering": "client", "interface": "client", "assets": "client"}
+        for subsystem, role in domains.items():
+            self.snapshot["records"].append({
+                "key": f"owned.{subsystem}", "semantic": f"fixture.{subsystem}", "role": role,
+                "subsystem": subsystem, "kind": "behavior", "state": "inferred", "confidence": "medium",
+                "claim": "Observed a fixture phase.", "limits": "Fixture only.",
+                "evidence": [{"path": "run.txt", "method": "runtime"}],
+            })
+        self.ingest()
+        for subsystem, role in domains.items():
+            with self.subTest(subsystem=subsystem):
+                args = ("search", self.db, "--role", role, "--subsystem", subsystem)
+                self.assertEqual([r["key"] for r in json.loads(self.run_cli(*args))], [f"owned.{subsystem}"])
+                self.assertEqual(json.loads(self.run_cli(*args, "--revision", "1")), [])
+
     def test_rejects_dangling_links_changed_evidence_and_missing_proof(self):
         self.ingest()
         self.snapshot["revision"] = 2

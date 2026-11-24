@@ -13,7 +13,10 @@ import sys
 FORMAT = 1
 APPLICATION = 0x494E5253
 ROLES = {"client", "dedicated", "solo"}
-SUBSYSTEMS = {"registries", "crafting", "inventory", "persistence", "voxels", "simulation", "generation", "creative"}
+SUBSYSTEMS = {
+    "assets", "crafting", "creative", "generation", "interface", "inventory",
+    "lifecycle", "persistence", "registries", "rendering", "simulation", "voxels",
+}
 KINDS = {"function", "type", "behavior", "data-contract", "prerequisite", "match"}
 COOPERATIVE_SIGNATURES = {"rule": "int(opaque const*)", "position": "position(opaque const*)"}
 STATES = {"discovered", "inferred", "verified"}
