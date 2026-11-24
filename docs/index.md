@@ -6,11 +6,8 @@ API.
 
 ## Game versions
 
-| Openworld | Platform | Guide |
-| --- | --- | --- |
-| a1.2.10 | Linux x86-64 | [Build, run and write mods](versions/a1.2.10/index.md) |
-
-Each guide describes the loader and API on its game branch. The
+[Choose your Openworld version](versions/index.md) for platform support, build
+instructions and examples for the loader and API on that branch. The
 [first release milestone](https://github.com/ImJstNickDev/Innesto/milestone/1)
 tracks progress toward the development prerelease.
 
