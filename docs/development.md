@@ -32,7 +32,9 @@ git switch -c docs/api-guide origin/main
 Use a descriptive prefix such as `feat/`, `fix/` or `docs/`. Keep game-specific
 examples and reference documentation alongside the implementation on its
 version branch. Write version-specific pages in `docs/version/`, with `index.md`
-as their starting page. The site publishes them at `versions/<version>/`. When
+as their starting page. When you create a `game/<version>` branch with that
+index, the next site build adds it to the [version catalog](versions/index.md)
+and publishes its guide at `versions/<version>/`. When
 working on a feature branch for a game version, preview its local pages with
 `python tools/docs/site.py serve --game a1.2.10` in the documentation environment.
 
