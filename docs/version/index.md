@@ -10,6 +10,7 @@ in dependency order before the host enters `main`.
 - [Client, server and shared mods](environments.md) covers physical environments, capability discovery, logical sides and startup completion.
 - [Build and load a mod package](mod-packages.md) to install the two example mods, write a manifest and declare dependencies.
 - [Native mod initialization](native-initialization.md) describes the public C entrypoint, the private target profile and how to launch a single library.
+- [Native mappings](native-mappings.md) describes exact-build function and type resolution, typed decision hooks, and the original stripped fixtures.
 
 The [draft block-break listener](before-block-break.md) can be exercised with
 two native builds of the same test simulation. The adapted build calls the

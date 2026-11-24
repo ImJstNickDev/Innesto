@@ -16,6 +16,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 2
       - name: Configure
         run: >-
           cmake -S . -B build/native -DCMAKE_BUILD_TYPE=Release
@@ -25,3 +26,21 @@ jobs:
         run: cmake --build build/native --parallel
       - name: Exercise the example and target checks
         run: ctest --test-dir build/native --output-on-failure
+
+      - name: Check whether the Gum fixture changed
+        id: gum
+        if: github.event_name == 'pull_request'
+        run: |
+          paths=$(git diff --name-only HEAD^1 HEAD -- tests/mappings/gum_probe.c tests/mappings/CMakeLists.txt .github/workflows/native.yml)
+          if [[ -n "$paths" ]]; then echo 'changed=true' >> "$GITHUB_OUTPUT"; fi
+      - name: Exercise Gum on the stripped original fixture
+        if: steps.gum.outputs.changed == 'true'
+        run: |
+          mkdir -p build/gum-devkit
+          curl -fsSL --retry 3 -o build/gum-devkit/devkit.tar.xz \
+            https://github.com/frida/frida/releases/download/17.9.11/frida-gum-devkit-17.9.11-linux-x86_64.tar.xz
+          echo '33c82c9849c2d7d540e9995dc756dbed453dbf993af894fb15d963025de59dd8  build/gum-devkit/devkit.tar.xz' | sha256sum --check
+          tar -xf build/gum-devkit/devkit.tar.xz -C build/gum-devkit ./frida-gum.h ./libfrida-gum.a
+          cmake -S . -B build/native -DINNESTO_GUM_DEVKIT="$PWD/build/gum-devkit"
+          cmake --build build/native --target innesto-gum-probe
+          ctest --test-dir build/native -V -R '^native-gum-probe$'
