@@ -11,18 +11,13 @@ import os
 from pathlib import Path
 import platform
 import re
-import stat
-import struct
 import sys
 
+from innesto_elf import ET_DYN, ET_EXEC, PT_DYNAMIC, PT_INTERP, elf_segments, verify_target_image
 from innesto_packages import SelectedMod, select_packages, unique_keys
 from innesto_terrain import start as start_with_terrain
 
 
-ET_EXEC = 2
-ET_DYN = 3
-PT_DYNAMIC = 2
-PT_INTERP = 3
 LOADER_TOKEN = re.compile(r"\$(?:\{(?:ORIGIN|LIB|PLATFORM)\}|(?:ORIGIN|LIB|PLATFORM)(?![a-zA-Z0-9_]))")
 
 
@@ -43,35 +38,6 @@ def read_profile(path):
     if environment not in ("client", "server"):
         raise ValueError("target environment must be 'client' or 'server'")
     return executable, digest.lower(), environment, data
-
-
-def elf_segments(stream):
-    """Return the ELF type and program segment types for a Linux x86-64 file."""
-    fd = stream.fileno()
-    size = os.fstat(fd).st_size
-    header = os.pread(fd, 64, 0)
-    if len(header) != 64 or header[:7] != b"\x7fELF\x02\x01\x01":
-        return None, set()
-    elf_type, machine, version = struct.unpack_from("<HHI", header, 16)
-    start = struct.unpack_from("<Q", header, 32)[0]
-    header_size, stride, count = struct.unpack_from("<HHH", header, 52)
-    if (machine, version, header_size, stride) != (62, 1, 64, 56) or start + stride * count > size:
-        return None, set()
-    table = os.pread(fd, stride * count, start)
-    if len(table) != stride * count:
-        return None, set()
-    segments = set()
-    for item in struct.iter_unpack("<IIQQQQQQ", table):
-        segment, _, offset, _, _, length, _, _ = item
-        if segment == PT_INTERP:
-            if PT_INTERP in segments or not 2 <= length <= 4096 or offset + length > size:
-                return None, set()
-            interpreter = os.pread(fd, length, offset)
-            if (not interpreter.startswith(b"/") or interpreter.count(b"\0") != 1
-                    or os.path.basename(interpreter) != b"ld-linux-x86-64.so.2\0"):
-                return None, set()
-        segments.add(segment)
-    return elf_type, segments
 
 
 def verify_bootstrap(loader, directory):
@@ -120,12 +86,7 @@ def run(args):
     executable, expected_digest, environment, profile = read_profile(args.profile)
     # The executable descriptor stays open from validation through execve.
     with open(executable, "rb") as target:
-        elf_type, segments = elf_segments(target)
-        if elf_type not in (ET_EXEC, ET_DYN) or not {PT_DYNAMIC, PT_INTERP}.issubset(segments):
-            raise ValueError("unsupported target executable format")
-        mode = os.fstat(target.fileno()).st_mode
-        if mode & (stat.S_ISUID | stat.S_ISGID) or "security.capability" in os.listxattr(target.fileno()):
-            raise ValueError("unsupported target privilege mode")
+        verify_target_image(target)
         verified_digest = hashlib.file_digest(target, "sha256").hexdigest()
         if verified_digest != expected_digest:
             raise ValueError("unsupported target fingerprint")
@@ -151,16 +112,17 @@ def run(args):
             # with one or more of stdin, stdout and stderr closed.
             fd = fcntl.fcntl(loader.fileno(), fcntl.F_DUPFD_CLOEXEC, 3)
             with os.fdopen(fd, "rb") as inherited, mod_list(environment, verified_digest, mods) as plan:
-                def launch(image, path, arguments, world_lease=None):
-                    launch_target(image, path, inherited, plan, arguments, world_lease)
+                def launch(image, path, arguments, world_lease=None, *, exec_target=os.execve):
+                    launch_target(image, path, inherited, plan, arguments, world_lease, exec_target)
 
                 return start_with_terrain(target, executable, verified_digest, environment,
                                          mods, profile, args.target_args, launch, args.terrain_peer,
                                          migrate=args.migrate_terrain, preview=args.preview_terrain,
-                                         remaps=args.remaps, backup=args.backup_world, packages=args.mods_dir)
+                                         remaps=args.remaps, backup=args.backup_world, packages=args.mods_dir,
+                                         solo_world=args.solo_world, loader_path=loader_path)
 
 
-def launch_target(target, executable, inherited, plan, arguments, world_lease=None):
+def launch_target(target, executable, inherited, plan, arguments, world_lease=None, exec_target=os.execve):
     fd = inherited.fileno()
     preload = f"/proc/self/fd/{fd}"
     with open(preload, "rb") as proc_entry:
@@ -184,10 +146,25 @@ def launch_target(target, executable, inherited, plan, arguments, world_lease=No
         os.set_inheritable(world_lease, True)
     os.set_inheritable(fd, True)
     os.set_inheritable(plan.fileno(), True)
-    os.execve(target.fileno(), [executable, *arguments], env)
+    exec_target(target.fileno(), [executable, *arguments], env)
 
 
 def main():
+    if sys.argv[1:2] == ["--solo-reference"]:
+        from adapters.a1_2_10.solo_reference import reference
+        parser = argparse.ArgumentParser(description="Read private terrain pins from a trusted stock Solo session.")
+        parser.add_argument("--solo-reference", type=Path, required=True, metavar="CLIENT_PROFILE")
+        parser.add_argument("--stock-solo-log", type=Path, required=True, metavar="CONSOLE_LOG")
+        args = parser.parse_args()
+        try:
+            executable, digest, environment, _ = read_profile(args.solo_reference)
+            if environment != "client":
+                raise ValueError("Solo reference requires a physical client profile")
+            pins = reference(executable, digest, args.stock_solo_log)
+        except (OSError, ValueError) as exc:
+            parser.exit(1, f"innesto-run: {exc}\n")
+        print(json.dumps(pins, indent=2))
+        return 0
     if sys.argv[1:2] == ["--terrain-reference"]:
         reference = argparse.ArgumentParser(description="Print private terrain pins from a trusted stock installation and stock server.")
         reference.add_argument("--terrain-reference", type=Path, metavar="EXECUTABLE", required=True)
@@ -206,11 +183,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", required=True, type=Path, help="private trusted target profile")
     parser.add_argument("--loader", required=True, type=Path, help="Innesto shared library")
-    parser.add_argument("--terrain-peer", metavar="HOST:PORT", help="preflight this terrain server before opening the client menu")
+    route = parser.add_mutually_exclusive_group()
+    route.add_argument("--solo-world", type=Path, metavar="WORLD",
+                       help="open one managed Survival world in the native client Solo menu")
+    route.add_argument("--terrain-peer", metavar="HOST:PORT", help="preflight this terrain server before opening the client menu")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--preview-terrain", action="store_true", help="preview changes to a stopped terrain world")
     mode.add_argument("--migrate-terrain", action="store_true",
-                        help="update an existing dedicated world's registry offline (use -- --data-dir WORLD)")
+                        help="update the selected terrain world's registry offline")
     parser.add_argument("--remap-terrain", action="append", default=[], metavar="PERSISTENT_ID=PROVIDER_ID",
                         help="explicitly select the provider of a saved slot during preview or migration")
     parser.add_argument("--backup-world", type=Path, metavar="DIRECTORY",
@@ -222,6 +202,8 @@ def main():
     args = parser.parse_args()
     if (args.migrate_terrain or args.preview_terrain) and not args.mods_dir:
         parser.error("offline terrain operations require --mods-dir")
+    if args.solo_world is not None and not args.mods_dir:
+        parser.error("--solo-world requires --mods-dir")
     if args.remap_terrain and not (args.migrate_terrain or args.preview_terrain):
         parser.error("--remap-terrain requires --preview-terrain or --migrate-terrain")
     if args.backup_world and not args.migrate_terrain:
