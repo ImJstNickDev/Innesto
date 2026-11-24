@@ -1,8 +1,7 @@
 """Prepare a process-local terrain pack and protect the dedicated world's registry."""
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import fcntl
 import hashlib
-import json
 import os
 import re
 from pathlib import Path
@@ -12,45 +11,7 @@ import tempfile
 
 from adapters.a1_2_10 import terrain, terrain_target as routing
 from adapters.a1_2_10.terrain_names import stage_display_names
-from innesto_packages import unique_keys
-
-
-REGISTRY = "innesto-terrain-v1.json"
-
-
-@contextmanager
-def world_registry(world, receipt):
-    world.mkdir(parents=True, exist_ok=True)
-    with directory_lock(world) as lease:
-        path = world / REGISTRY
-        if os.path.lexists(path):
-            if path.is_symlink() or not path.is_file():
-                raise ValueError("unreadable terrain registry")
-            try:
-                previous = json.loads(path.read_bytes(), object_pairs_hook=unique_keys)
-            except (UnicodeError, ValueError):
-                raise ValueError("invalid terrain registry") from None
-            if json.dumps(previous, sort_keys=True) != json.dumps(receipt, sort_keys=True):
-                raise ValueError("terrain registry mismatch: restore the original material packages and build")
-        else:
-            if any(world.iterdir()):
-                raise ValueError("nonempty world has no terrain registry; start a new world or restore its registry")
-            with tempfile.NamedTemporaryFile(mode="w", dir=world, delete=False) as out:
-                temporary = Path(out.name)
-                try:
-                    json.dump(receipt, out, sort_keys=True, indent=2)
-                    out.write("\n")
-                    out.flush()
-                    os.fsync(out.fileno())
-                    os.replace(temporary, path)
-                finally:
-                    temporary.unlink(missing_ok=True)
-            fd = os.open(world, os.O_DIRECTORY)
-            try:
-                os.fsync(fd)
-            finally:
-                os.close(fd)
-        yield lease
+from innesto_registry import REGISTRY, Registry
 
 
 @contextmanager
@@ -68,6 +29,11 @@ def directory_lock(directory):
         yield fd
     finally:
         os.close(fd)
+
+
+def check_world_path(world, lease):
+    if not os.path.samestat(os.fstat(lease), world.stat()):
+        raise ValueError("terrain world directory changed while locked")
 
 
 def copy_assets(source, destination, stock):
@@ -113,14 +79,18 @@ def run_supervised(action):
     return code if code >= 0 else 128 - code
 
 
-def start(target, executable, digest, environment, mods, profile, arguments, launch, selected_peer=None):
-    materials = sorted((m for mod in mods for m in mod.terrain), key=lambda m: m.id)
+def start(target, executable, digest, environment, mods, profile, arguments, launch, selected_peer=None,
+          migrate=False):
+    materials = {m.id: m for mod in mods for m in mod.terrain}
+    if migrate and (environment != "server" or not materials or len(arguments) != 2
+                    or arguments[0] != "--data-dir"):
+        raise ValueError("--migrate-terrain requires shared terrain packages and -- --data-dir WORLD on a server")
     if selected_peer is not None and (environment != "client" or not materials):
         raise ValueError("--terrain-peer requires a client with shared terrain packages")
     world = None
     if environment == "server":
         world = routing.world_for_launch(arguments, bool(materials), REGISTRY)
-        if not materials and os.path.lexists(world / REGISTRY):
+        if not materials and routing.protected(world, REGISTRY):
             raise ValueError("terrain packages missing for this world; restore them before opening it")
     if not materials:
         if "terrainPackSha256" in profile or "terrainBaseCount" in profile:
@@ -130,8 +100,9 @@ def start(target, executable, digest, environment, mods, profile, arguments, lau
         if world is not None and routing.opens_dedicated_world(arguments):
             world.mkdir(parents=True, exist_ok=True)
             with directory_lock(world) as lease:
-                if os.path.lexists(world / REGISTRY):
+                if routing.protected(world, REGISTRY):
                     raise ValueError("terrain packages missing for this world")
+                check_world_path(world, lease)
                 launch(target, executable, arguments, lease)
         else:
             launch(target, executable, arguments)
@@ -142,36 +113,64 @@ def start(target, executable, digest, environment, mods, profile, arguments, lau
         raise ValueError("terrain requires a trusted terrainPackSha256 in the private profile")
     if type(base_count) is not int or base_count <= 0:
         raise ValueError("terrain requires a trusted terrainBaseCount in the private profile")
+    terrain.check_slot_count(base_count, len(materials))
     stock = terrain.original_pack(Path(executable).resolve())
     cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "innesto/terrain"
     source_assets = Path(executable).resolve().parent / "assets"
     if cache.resolve().is_relative_to(source_assets.resolve()):
         raise ValueError("terrain runtime cache must be outside the game assets")
+    if world is not None:
+        if cache.resolve().is_relative_to(world):
+            raise ValueError("terrain runtime cache must be outside the world")
+        if migrate and not world.is_dir():
+            raise ValueError("terrain migration requires an existing managed world")
+        world.mkdir(mode=0o700, parents=True, exist_ok=True)
     cache.mkdir(mode=0o700, parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=cache, prefix="run-") as temporary:
-        runtime = Path(temporary)
-        copy_assets(source_assets, runtime / "assets", stock)
-        generated = runtime / "assets" / stock.relative_to(source_assets)
-        generated.parent.chmod(generated.parent.stat().st_mode | 0o700)
-        textures = terrain.stage_pack(stock, generated, materials, baseline)
+    with (directory_lock(world) if world is not None else nullcontext()) as lease:
         if world is None:
-            stage_display_names(runtime / "assets", materials)
-        image = runtime / Path(executable).name
-        target.seek(0)
-        with image.open("xb") as dest:
-            shutil.copyfileobj(target, dest)
-        image.chmod(0o500)
-        with image.open("rb") as staged:
-            if hashlib.file_digest(staged, "sha256").hexdigest() != digest:
-                raise ValueError("staged terrain target identity changed")
+            from adapters.a1_2_10.terrain_peer import peer_order, verify_peer
+            peer = routing.peer_address(arguments, profile.get("terrainDashboardPort"), selected_peer)
+            order = peer_order(*peer, materials, base_count)
+        else:
+            identity = {"game": "a1.2.10", "platform": "linux-x86_64", "server": digest,
+                        "stock": baseline, "baseCount": base_count}
+            registry = Registry(lease, identity)
+            order = registry.order(materials, migrate=migrate)
+        ordered = [materials[mid] for mid in order]
+        with tempfile.TemporaryDirectory(dir=cache, prefix="run-") as temporary:
+            runtime = Path(temporary)
+            if migrate:
+                # Only the ephemeral candidate pack and the registry are needed offline.
+                legacy = {} if registry.schema == 1 else None
+                candidates = terrain.stage_materials(stock, runtime / "pack", ordered, baseline, legacy_receipts=legacy)
+                check_world_path(world, lease)
+                changed = registry.accept(candidates, migrate=True, legacy_receipts=legacy)
+                print("Terrain registry updated." if changed else "Terrain registry already current.")
+                return 0
+            copy_assets(source_assets, runtime / "assets", stock)
+            generated = runtime / "assets" / stock.relative_to(source_assets)
+            generated.parent.chmod(generated.parent.stat().st_mode | 0o700)
+            candidates = terrain.stage_materials(stock, generated, ordered, baseline)
             if world is None:
-                from adapters.a1_2_10.terrain_peer import verify_peer
-                peer = routing.peer_address(arguments, profile.get("terrainDashboardPort"), selected_peer)
-                verify_peer(*peer, textures, base_count)
-                return run_supervised(lambda: launch(staged, str(image), arguments))
-            arguments = routing.bind_world(arguments, world)
-            receipt = {"schema": 1, "game": "a1.2.10", "platform": "linux-x86_64",
-                       "server": digest, "stock": baseline, "baseCount": base_count,
-                       "materials": [[key, value] for key, value in textures.items()]}
-            with world_registry(world, receipt) as lease:
-                return run_supervised(lambda: launch(staged, str(image), arguments, lease))
+                stage_display_names(runtime / "assets", ordered)
+            image = runtime / Path(executable).name
+            target.seek(0)
+            with image.open("xb") as dest:
+                shutil.copyfileobj(target, dest)
+            image.chmod(0o500)
+            with image.open("rb") as staged:
+                if hashlib.file_digest(staged, "sha256").hexdigest() != digest:
+                    raise ValueError("staged terrain target identity changed")
+                if world is None:
+                    receipts = {mid: info["receipt"] for mid, info in candidates.items()}
+                    verify_peer(*peer, receipts, base_count, initial_order=order)
+                    return run_supervised(lambda: launch(staged, str(image), arguments))
+                check_world_path(world, lease)
+                registry.accept(candidates)
+                arguments = routing.bind_world(arguments, world)
+
+                def launch_world():
+                    check_world_path(world, lease)
+                    launch(staged, str(image), arguments, lease)
+
+                return run_supervised(launch_world)

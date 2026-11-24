@@ -17,11 +17,18 @@ MATERIAL_ID = re.compile(f"({COMPONENT}):({COMPONENT})", re.ASCII)
 PREFIX = "innesto_"
 NATIVE_FAMILIES = {"rock": "roche", "plant": "plante", "liquid": "liquide",
                    "glass": "verre", "foliage": "feuillage", "crop": "culture"}
+# Saved terrain slots are unsigned 16-bit values on this version.
+MAX_CATALOGUE_SIZE = 1 << 16
 V1_PARAMETERS = "1.000000 0 roche"
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 PNG_HEADER = struct.pack(">IIBBBBB", 32, 32, 8, 6, 0, 0, 0)
 MAX_PNG_BYTES = 64 * 1024
 ROW_BYTES = 1 + 32 * 4
+
+
+def check_slot_count(base_count, additions):
+    if type(base_count) is not int or base_count < 1 or base_count + additions > MAX_CATALOGUE_SIZE:
+        raise ValueError("terrain catalogue exceeds the supported native slot range")
 
 
 def original_pack(executable: Path) -> Path:
@@ -79,7 +86,7 @@ def stock_fingerprint(stock: Path) -> str:
     return _stock_tree(stock)
 
 
-def _texture_bytes(path):
+def _read_texture(path):
     with path.open("rb") as stream:
         data = stream.read(MAX_PNG_BYTES + 1)
     if len(data) > MAX_PNG_BYTES or not data.startswith(PNG_SIGNATURE):
@@ -119,7 +126,28 @@ def _texture_bytes(path):
     if (not inflater.eof or inflater.unused_data or len(rows) != expected
             or any(f > 4 for f in rows[::ROW_BYTES])):
         raise ValueError("invalid terrain PNG scanlines")
-    return data
+    return data, rows
+
+
+def _texture_bytes(path):
+    return _read_texture(path)[0]
+
+
+def _opaque(rows):
+    # PNG filters predict each channel from the same channel in adjacent pixels.
+    # While testing for constant alpha, every previous alpha is known to be 255.
+    for y in range(32):
+        start = y * ROW_BYTES
+        kind = rows[start]
+        above = 255 if y else 0
+        for x in range(32):
+            left = 255 if x else 0
+            # With a constant alpha, the Paeth predictor picks the available
+            # opaque neighbour, or zero in the top-left corner.
+            predictor = (0, left, above, (left + above) // 2, max(left, above))[kind]
+            if rows[start + 4 + 4 * x] != 255 - predictor:
+                return False
+    return True
 
 
 def content_fingerprint(texture: Path) -> str:
@@ -173,12 +201,21 @@ def _receipt(stock_digest, parameters, names, frames):
         definition = json.dumps(traits, sort_keys=True, ensure_ascii=False,
                                 separators=(",", ":")).encode("utf-8")
         commitment = hashlib.sha256(b"Innesto terrain receipt v2\0" + bytes.fromhex(stock_digest) + definition)
+    return _png_receipt(commitment)
+
+
+def _png_receipt(commitment):
     body = b"Innesto\0" + commitment.hexdigest().encode("ascii")
     return struct.pack(">I", len(body)) + b"tEXt" + body + struct.pack(">I", zlib.crc32(b"tEXt" + body))
 
 
-def stage_pack(stock: Path, destination: Path, materials, expected_stock_sha256: str) -> dict[str, str]:
-    """Build an independent copy in a new directory and return the served texture digests."""
+def _definition_hash(fields):
+    encoded = json.dumps(fields, separators=(",", ":"), ensure_ascii=False, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def stage_materials(stock: Path, destination: Path, materials, expected_stock_sha256: str, *, legacy_receipts=None):
+    """Stage one pack in the supplied slot order. Describe the exact bytes used."""
     if destination.resolve().is_relative_to(stock.resolve()):
         raise ValueError("runtime pack must be outside the stock pack")
     destination.mkdir(mode=0o700)
@@ -197,14 +234,32 @@ def stage_pack(stock: Path, destination: Path, materials, expected_stock_sha256:
             if key in occupied or _tile_family(key) in occupied:
                 raise ValueError(f"terrain material collision for {material.id!r}")
             occupied.add(key)
-            image = _texture_bytes(material.texture)
+            texture, rows = _read_texture(material.texture)
             frames = stage_frames(blocks, key, material.frames, _texture_bytes)
             parameters = f"{material.tile_meters:.6f} {int(bool(frames))} {NATIVE_FAMILIES[material.family]}"
             # Insert the commitment immediately before IEND, after the complete IDAT stream.
-            image = image[:-12] + _receipt(digest, parameters, material.display_names, frames) + image[-12:]
+            image = texture[:-12] + _receipt(digest, parameters, material.display_names, frames) + texture[-12:]
             with (blocks / f"ow_{key}.png").open("xb") as stream:
                 stream.write(image)
-            result[material.id] = hashlib.sha256(image).hexdigest()
+            receipt = hashlib.sha256(image).hexdigest()
+            if (legacy_receipts is not None and parameters != V1_PARAMETERS
+                    and not frames and not material.display_names):
+                # The first family/scale writer committed the native parameters directly.
+                # Recover only a byte-exact match during explicit legacy enrollment.
+                old = hashlib.sha256(b"Innesto terrain receipt v2\0" + bytes.fromhex(digest)
+                                     + parameters.encode("ascii"))
+                legacy_receipts[material.id] = hashlib.sha256(
+                    texture[:-12] + _png_receipt(old) + texture[-12:]).hexdigest()
+            appearance = [float(material.tile_meters), material.display_names, frames]
+            visual = _definition_hash([*appearance, hashlib.sha256(texture).hexdigest()])
+            rgb_editable = material.family == "rock" and not frames and _opaque(rows)
+            result[material.id] = {
+                "receipt": receipt,
+                "gameplay": _definition_hash(["family", material.family]),
+                "visual": visual,
+                "visualPolicy": _definition_hash(["opaque-rock-rgb", *appearance] if rgb_editable
+                                                 else ["exact-appearance", visual]),
+            }
             lines.append(f"tile ow_{key} {parameters}\n")
         if lines:
             with descriptor.open("ab") as stream:
@@ -215,3 +270,9 @@ def stage_pack(stock: Path, destination: Path, materials, expected_stock_sha256:
     except BaseException:
         shutil.rmtree(destination)
         raise
+
+
+def stage_pack(stock: Path, destination: Path, materials, expected_stock_sha256: str) -> dict[str, str]:
+    """Return the wire receipts used by existing terrain peers."""
+    staged = stage_materials(stock, destination, materials, expected_stock_sha256)
+    return {mid: fields["receipt"] for mid, fields in staged.items()}

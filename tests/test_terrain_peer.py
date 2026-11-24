@@ -68,7 +68,7 @@ class CatalogueTests(unittest.TestCase):
         self.catalogue()
         self.verify()
         self.assertEqual(self.requests, [CATALOGUE, "/pack/ow_innesto_6_garden_mint.png",
-                                         "/pack/ow_innesto_4_rock_slate.png"])
+                                         "/pack/ow_innesto_4_rock_slate.png", CATALOGUE])
 
     def test_wrong_missing_or_extra_materials_are_refused_before_texture_fetch(self):
         initial = self.rows
@@ -92,6 +92,32 @@ class CatalogueTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.verify()
                 self.assertEqual(self.requests, [CATALOGUE])
+
+    def test_discover_appended_slots_before_staging_then_refuse_a_late_reorder(self):
+        host, port = self.server.server_address
+        ids = list(self.materials)
+        self.rows[2]["id"], self.rows[3]["id"] = 3, 2
+        self.catalogue()
+        order = terrain_peer.peer_order(host, port, ids, 2)
+        self.assertEqual(order, list(reversed(ids)))
+        staged = {mid: self.materials[mid] for mid in order}
+        terrain_peer.verify_peer(host, port, staged, 2)
+        self.rows[2]["id"], self.rows[3]["id"] = 2, 3
+        self.catalogue()
+        with self.assertRaisesRegex(ValueError, "IDs"):
+            terrain_peer.verify_peer(host, port, staged, 2)
+
+    def test_reordered_peer_during_texture_download_is_rejected(self):
+        original_fetch = terrain_peer._fetch
+        def fetch(host, port, path, limit):
+            body = original_fetch(host, port, path, limit)
+            if path == self.rows[2]["texture"]:
+                self.rows[2]["id"], self.rows[3]["id"] = 3, 2
+                self.catalogue()
+            return body
+        with patch.object(terrain_peer, "_fetch", side_effect=fetch):
+            with self.assertRaisesRegex(ValueError, "changed during preflight"):
+                self.verify()
 
     def test_redirects_and_unexpected_paths_are_never_followed(self):
         for path in ("https://outside.invalid/file", "//outside.invalid/file",

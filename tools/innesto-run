@@ -155,7 +155,7 @@ def run(args):
                     launch_target(image, path, inherited, plan, arguments, world_lease)
 
                 return start_with_terrain(target, executable, verified_digest, environment,
-                                         mods, profile, args.target_args, launch, args.terrain_peer)
+                                         mods, profile, args.target_args, launch, args.terrain_peer, args.migrate_terrain)
 
 
 def launch_target(target, executable, inherited, plan, arguments, world_lease=None):
@@ -205,6 +205,8 @@ def main():
     parser.add_argument("--profile", required=True, type=Path, help="private trusted target profile")
     parser.add_argument("--loader", required=True, type=Path, help="Innesto shared library")
     parser.add_argument("--terrain-peer", metavar="HOST:PORT", help="preflight this terrain server before opening the client menu")
+    parser.add_argument("--migrate-terrain", action="store_true",
+                        help="update an existing dedicated world's registry offline (use -- --data-dir WORLD)")
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--mod", type=Path, help="one mod shared library")
     source.add_argument("--mods-dir", type=Path, help="directory containing unpacked mod packages")

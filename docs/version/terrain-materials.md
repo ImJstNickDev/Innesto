@@ -45,7 +45,7 @@ Set `content.version` to `2` to select a material family. You can also set the t
 
 The server applies these properties to placed voxels. It counted an elevated rock pad as the terrain surface, looked through an equally sized plant pad to the stone below and reported liquid depth for a liquid pad. Suspended rock stayed in place. Plant voxels placed above open air disappeared and could be placed again in the same cells. The contract provides the game's family behavior. Growth rules, flow, drop tables and new recipes have no registration fields in this version.
 
-`tileMeters` accepts `0.25`, `0.5`, `1`, `1.5`, `2` or `2.5`. The default is `1`. The dedicated server reports this value in its catalogue. Its 3D dashboard map repeats the texture four times across a metre at `0.25` and once at `1`. The connected game client showed the same checker spacing at `0.5` and `2` in a side-by-side test. Version 1 materials keep their original rock definition and value of `1`. Writing those same defaults in version 2 preserves the material's compatibility with its existing world.
+`tileMeters` accepts `0.25`, `0.5`, `1`, `1.5`, `2` or `2.5`. The default is `1`. The dedicated server reports this value in its catalogue. Its 3D dashboard map repeats the texture four times across a metre at `0.25` and once at `1`. The connected game client showed the same checker spacing at `0.5` and `2` in a side-by-side test. Version 1 materials keep their original rock definition and value of `1`. Writing those same defaults in version 2 preserves the existing material binding.
 
 ### Name a material in the player's language
 
@@ -112,12 +112,35 @@ Start a client with a legitimate local game directory and its normal licensed se
 
 Choose **Multiplayer → Direct connect** in the visible window and enter the same address, `127.0.0.1:24710`. Openworld’s own `--play HOST:PORT` starts a hidden direct client for automated sessions. Innesto also checks the peer supplied by that flag.
 
-Before starting the client, Innesto reads the chosen server's dashboard catalogue and compares material names, absolute slots and served texture receipts. For each material, the receipt covers the base texture, family, catalogue tile size, translations and ordered frame contents. Changing any of them requires matching packages on both sides and a new world. The default dashboard TCP port is the game port plus one. Set `terrainDashboardPort` in the client profile for a different dashboard port. The client must be able to read that dashboard. These examples use loopback. The preflight applies to the selected address. Opening the menu does not restrict the game’s other server choices. Restart Innesto to check a different server.
+Before starting the client, Innesto reads the chosen server's dashboard catalogue and compares material names, absolute slots and served texture receipts. For each material, the receipt covers the base texture, family, catalogue tile size, translations and ordered frame contents. Both peers need matching packages. The launcher stages client materials in the dedicated world’s slot order and checks the slots and receipts again before starting the game. The default dashboard TCP port is the game port plus one. Set `terrainDashboardPort` in the client profile for a different dashboard port. The client must be able to read that dashboard. These examples use loopback. The preflight applies to the selected address. Opening the menu does not restrict the game’s other server choices. Restart Innesto to check a different server.
 
 ## Reopen and back up a world
 
-Innesto sorts namespaced IDs, stages a private runtime under `$XDG_CACHE_HOME/innesto/terrain` (default `~/.cache/innesto/terrain`) and runs an identical copy of the verified executable with the generated assets. It removes this copy on normal exit. The original installation and package files stay in place.
+Innesto stages a private runtime under `$XDG_CACHE_HOME/innesto/terrain` (default `~/.cache/innesto/terrain`) and removes it on normal exit. A new dedicated world assigns its first slots in namespaced ID order. Its registry records each material ID, absolute slot, gameplay definition and visual revision. Each later launch restores that order, including when package directories are renamed.
 
-The first launch writes `innesto-terrain-v1.json` inside the dedicated world's data directory. **Back up the entire directory, including this file.** Repeat launches check the exact content set, its textures, material properties and build before the game opens the world. Reordering package directories is safe. To resume after a mismatch, restore the recorded build and original package content. A new material set needs a new world. A populated world without its registry cannot be adopted by this version.
+**Back up the entire stopped world directory**, including `innesto-terrain-v1.json`. The filename is shared by both registry schemas so older Innesto launchers can recognize a protected world. The launcher opens schema 1 worlds created by earlier game-branch builds with their original packages and registry bytes. Worlds from the initial family-and-scale development build require one offline enrollment with the original assets before reopening. Populated worlds without their registry require a complete matching backup. Use Innesto for every launch of a managed world.
 
-Always reopen a managed world through Innesto. The stock executable and other launchers do not enforce Innesto's registry. The server and its clients must use matching terrain-enabled profiles. Independently launched clients are outside the launcher's preflight.
+## Add a content package to an existing world
+
+Stop the dedicated server before copying, moving or replacing its data directory. Keep a complete backup of the world. Install the additional shared package alongside the original packages. For example, to add Aster to the Copperfield and Reedbed installation above:
+
+```sh
+cmake -S "$innesto_root/examples/aster" -B "$innesto_root/build/aster" \
+  -DINNESTO_INCLUDE_DIR="$innesto_root/include"
+cmake --build "$innesto_root/build/aster"
+cmake --install "$innesto_root/build/aster" --prefix "$innesto_root/build/terrain-survival-mods"
+
+"$innesto_root/tools/innesto-run" --migrate-terrain --profile "$server_profile" \
+  --loader "$innesto_root/build/native/innesto-bootstrap.so" \
+  --mods-dir "$innesto_root/build/terrain-survival-mods" -- --data-dir "$world_dir"
+```
+
+The migration stages the proposed pack and validates it while holding the world lock. It runs offline and updates only registry files. Existing materials keep their absolute slots. Innesto rejects a catalogue that exceeds the native 16-bit slot range. Newly installed IDs receive consecutive slots after the last binding, sorted only within that batch. In this example, `aster:chalk` follows `copperfield:ochre` and `reedbed:rush`. Install the matching package on each client, then use the normal server and client commands above. The client obtains the world's order from the dedicated dashboard.
+
+The same command enrolls a schema 1 world into schema 2. Supply the **original definitions and assets for every saved material** on that first migration. You may add new materials in the same step. The old registry contains a single receipt per material, so it takes the original package to separate its permanent binding from its appearance. New worlds use schema 2 immediately.
+
+## Update a texture or recover a migration
+
+An enrolled world accepts a replacement base PNG for a **static rock whose pixels are all opaque**, with the same ID, family, tile size and names. For example, change the RGB artwork for `copperfield:ochre` and install the updated package on both peers. Stop the server and run the migration command again. The slot and inventory identity stay fixed, the material’s revision advances and a client with the previous artwork fails preflight. Normal startup requires the recorded revision. Changing material family, transparency, frame sequence, names or tile size, editing another family's texture, and removing or renaming a saved ID are refused.
+
+A successful migration retains the exact previous registry as `innesto-terrain-v1.json.backup-<sha256>` and atomically replaces the active registry. Repeating the same migration is safe. After an interrupted migration, keep the candidate packages installed and repeat the command. If it reports an incompatible or missing definition, restore the required package before retrying. To return to a world that predates a successful migration, restore its **complete matching world backup and packages together**. Restoring an old registry alone could reinterpret terrain or inventory written in a newer slot.
