@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from innesto_registry import BACKUP, PENDING, REGISTRY, Registry
+from innesto_registry import BACKUP, PENDING, REGISTRY, Registry, provider_index
 
 
 def digest(text):
@@ -141,6 +141,149 @@ class RegistryTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "nonempty world"):
             self.registry()
         self.assertFalse(self.path.exists())
+
+    def test_provider_changes_preserve_world_identity_and_preview_is_read_only(self):
+        registry = self.registry()
+        registry.accept(self.installed)
+        before = self.snapshot()
+        replacement = {"new:top": ("stone:top",), "wool:red": ()}
+        remap = {"stone:top": "new:top"}
+        bindings = registry.bind(replacement, remap, migrate=True)
+        self.assertEqual(list(bindings.items()), [("stone:top", "new:top"), ("wool:red", "wool:red")])
+        plan = registry.plan(self.installed, migrate=True, bindings=bindings)
+        self.assertTrue(plan.changed)
+        self.assertEqual(plan.provider_changes, (("stone:top", "stone:top", "new:top"),))
+        self.assertTrue(any("stone:top" in action and "new:top" in action and "7" in action
+                            for action in plan.actions))
+        self.assertEqual(self.snapshot(), before)
+        self.assertTrue(registry.commit(plan))
+        with self.assertRaisesRegex(ValueError, "stale"):
+            registry.commit(plan)
+        after = self.snapshot()
+        saved = json.loads(after[REGISTRY])
+        self.assertEqual(saved["schema"], 3)
+        rows = saved["materials"]
+        for row, original in zip(rows, json.loads(before[REGISTRY])["materials"], strict=True):
+            self.assertEqual({k: v for k, v in row.items() if k != "provider"}, original)
+        self.assertEqual([row["provider"] for row in rows], ["new:top", "wool:red"])
+
+        for request, migrate in ((None, False), (remap, True)):
+            registry = self.registry()
+            bindings = registry.bind(replacement, request, migrate=migrate)
+            preview = registry.plan(self.installed, migrate=migrate, bindings=bindings)
+            self.assertFalse(preview.changed)
+            self.assertFalse(preview.provider_changes)
+            self.assertFalse(registry.commit(preview))
+            self.assertEqual(self.snapshot(), after)
+        installed = {mid: () for mid in self.installed}
+        for available in (installed, {**replacement, "stone:top": ()},
+                          {"new:top": (), "wool:red": ()}):
+            with self.subTest(available=available), self.assertRaises(ValueError):
+                registry.bind(available)
+        back = registry.bind(installed, {"stone:top": "stone:top"}, migrate=True)
+        restore = registry.plan(self.installed, migrate=True, bindings=back)
+        self.assertEqual(restore.provider_changes, (("stone:top", "new:top", "stone:top"),))
+        self.assertTrue(registry.commit(restore))
+        self.assertEqual(json.loads(self.path.read_bytes())["schema"], 3)
+        self.assertFalse(self.registry().accept(self.installed))
+
+    def test_missing_bindings_list_every_slot_and_recovery(self):
+        self.registry().accept(self.installed)
+        for available in ({}, {"other:top": ("stone:top",)}):
+            with self.subTest(available=available), self.assertRaises(ValueError) as caught:
+                self.registry().bind(available)
+            message = str(caught.exception)
+            for part in ("missing", "stone:top", "slot 7", "wool:red", "slot 8", "restore"):
+                self.assertIn(part, message)
+
+    def test_alias_index_and_stale_or_modified_preview_inputs(self):
+        providers = {"next:top": ("stone:top", "ancient:top"), "wool:red": ()}
+        self.assertEqual(provider_index(providers), {"next:top": "next:top", "stone:top": "next:top",
+                                                    "ancient:top": "next:top", "wool:red": "wool:red"})
+        for invalid in ({**providers, "stone:top": ()}, {**providers, "other:top": ("ancient:top",)},
+                        {None: ()}, {"bad.id": ()}, {"next:top": None}, {"next:top": ["bad id"]}):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                provider_index(invalid)
+
+        registry = self.registry()
+        original = {mid: () for mid in self.installed}
+        bindings = registry.bind(original)
+        with self.assertRaisesRegex(ValueError, "persistent ID"):
+            registry.plan(self.next, bindings=bindings)
+        stale = registry.plan(self.next)
+        self.registry().accept(self.installed)
+        before = self.snapshot()
+        with self.assertRaisesRegex(ValueError, "changed|stale"):
+            registry.commit(stale)
+        registry = self.registry()
+        bindings = registry.bind(providers, {"stone:top": "next:top"}, migrate=True)
+        bindings["stone:top"] = "other:top"
+        with self.assertRaisesRegex(ValueError, "unverified"):
+            registry.plan(self.installed, migrate=True, bindings=bindings)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_remap_requires_offline_enrollment_compatible_provider_and_exact_fingerprints(self):
+        original = {"stone:top": (), "wool:red": ()}
+        available = {"new:top": ("stone:top",), "wool:red": ()}
+        request = {"stone:top": "new:top"}
+        self.legacy()
+        with self.assertRaisesRegex(ValueError, "enroll"):
+            self.registry().bind(available, request, migrate=True)
+        self.registry().accept(self.installed, migrate=True)
+        before = self.snapshot()
+        registry = self.registry()
+        bad = [
+            (available, request, False),
+            (available, None, True),
+            ({"new:top": (), "wool:red": ()}, request, True),
+            ({**available, **original}, request, True),
+            ({**available, "more:blue": ()}, request, True),
+            (available, {"absent:id": "new:top"}, True),
+            (available, {"stone:top": "absent:id"}, True),
+            (available, {"stone:top": "wool:red"}, True),
+            ({"new:top": ("stone:top", "wool:red")}, {**request, "wool:red": "new:top"}, True),
+            ({**available, "second:top": ("stone:top",)}, request, True),
+            ({"new:top": ("stone:top", "stone:top"), "wool:red": ()}, request, True),
+            ({"new:top": ("wrong id",), "wool:red": ()}, request, True),
+            ({"new:top": "stone:top", "wool:red": ()}, request, True),
+            ({"new:top": ("new:top",), "wool:red": ()}, request, True),
+        ]
+        for installed, remaps, migrate in bad:
+            with self.subTest(installed=installed, remaps=remaps, migrate=migrate), self.assertRaises(ValueError):
+                registry.bind(installed, remaps, migrate)
+        bindings = registry.bind(available, request, migrate=True)
+        for field in self.installed["stone:top"]:
+            changed = {**self.installed["stone:top"], field: digest("different")}
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "incompatible"):
+                registry.plan({**self.installed, "stone:top": changed}, migrate=True, bindings=bindings)
+        with self.assertRaisesRegex(ValueError, "incompatible"):
+            registry.plan({**self.installed, "stone:top": material("new RGB")}, migrate=True, bindings=bindings)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_remapped_world_appends_in_sorted_order_and_rejects_invalid_provider_records(self):
+        registry = self.registry()
+        registry.accept(self.installed)
+        remapped = {"new:top": ("stone:top",), "wool:red": ()}
+        bindings = registry.bind(remapped, {"stone:top": "new:top"}, migrate=True)
+        registry.commit(registry.plan(self.installed, migrate=True, bindings=bindings))
+        installed = {**remapped, "z:last": (), "a:first": ()}
+        with self.assertRaisesRegex(ValueError, "migration"):
+            registry.bind(installed)
+        bindings = registry.bind(installed, migrate=True)
+        self.assertEqual(list(bindings), ["stone:top", "wool:red", "a:first", "z:last"])
+        candidates = {**self.installed, "a:first": material("green"), "z:last": material("orange")}
+        candidates["stone:top"] = material("cyan")
+        append = registry.plan(candidates, migrate=True, bindings=bindings)
+        self.assertFalse(append.provider_changes)
+        registry.commit(append)
+        record = json.loads(self.path.read_bytes())
+        rows = record["materials"]
+        self.assertEqual([(r["slot"], r["revision"]) for r in rows], [(7, 2), (8, 1), (9, 1), (10, 1)])
+        for malformed in ({**rows[0], "provider": "wool:red"}, {**rows[0], "provider": "not valid"},
+                          {k: v for k, v in rows[0].items() if k != "provider"}, {**rows[0], "slot": 6}):
+            self.path.write_text(json.dumps({**record, "materials": [malformed, *rows[1:]]}))
+            with self.subTest(malformed=malformed), self.assertRaises(ValueError):
+                self.registry()
 
     def test_invalid_identities_orders_slots_and_unknown_fields_fail_closed(self):
         legacy = json.loads(self.legacy())

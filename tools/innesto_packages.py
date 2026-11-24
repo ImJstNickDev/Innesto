@@ -8,6 +8,7 @@ import re
 import stat
 
 
+from adapters.a1_2_10.terrain import game_key
 from adapters.a1_2_10.terrain_names import validate_display_names
 
 
@@ -25,6 +26,7 @@ class TerrainMaterial:
     tile_meters: float = 1.0
     display_names: dict[str, str] = field(default_factory=dict)
     frames: tuple[Path, ...] = ()
+    aliases: tuple[str, ...] = ()
 
 
 @dataclass
@@ -99,8 +101,8 @@ def read_frames(assets, frames, field):
 
 def read_terrain(content, directory, mod_id):
     check_fields(content, "content", {"version", "assets", "terrain"})
-    if type(content["version"]) is not int or content["version"] not in (1, 2):
-        raise ValueError("content.version must be the integer 1 or 2")
+    if type(content["version"]) is not int or content["version"] not in (1, 2, 3):
+        raise ValueError("content.version must be the integer 1, 2 or 3")
     if not isinstance(content["terrain"], list):
         raise ValueError("content.terrain must be an array")
     try:
@@ -114,7 +116,9 @@ def read_terrain(content, directory, mod_id):
     prefix = mod_id + ":"
     for index, item in enumerate(content["terrain"]):
         field = f"content.terrain[{index}]"
-        optional = {"family", "tileMeters", "displayNames", "frames"} if content["version"] == 2 else set()
+        optional = {"family", "tileMeters", "displayNames", "frames"} if content["version"] >= 2 else set()
+        if content["version"] == 3:
+            optional.add("aliases")
         check_fields(item, field, {"id", "texture"}, optional)
         family = item.get("family", "rock")
         if family not in ("rock", "plant", "liquid", "glass", "foliage", "crop"):
@@ -127,14 +131,22 @@ def read_terrain(content, directory, mod_id):
         if (not isinstance(material_id, str) or not material_id.startswith(prefix)
                 or not matches(MOD_ID, material_id[len(prefix):])):
             raise ValueError(f"{field}.id must be {prefix}{MOD_ID.pattern}")
+        game_key(material_id)
         if material_id in materials:
             raise ValueError(f"duplicate terrain id {material_id!r}")
         try:
             texture = confined_file(assets, relative_path(item["texture"]), "assets directory")
         except (ValueError, OSError, RuntimeError) as exc:
             raise ValueError(f"invalid texture for {material_id!r}: {file_error(exc)}") from exc
+        aliases = item.get("aliases", [])
+        if not isinstance(aliases, list) or any(not isinstance(alias, str) for alias in aliases):
+            raise ValueError(f"{field}.aliases must be an array of namespaced identifiers")
+        for alias in aliases:
+            game_key(alias)
+        if material_id in aliases or len(set(aliases)) != len(aliases):
+            raise ValueError(f"{field}.aliases contains a duplicate or the material itself")
         frames = read_frames(assets, item.get("frames", []), field)
-        materials[material_id] = TerrainMaterial(material_id, texture, family, float(scale), names, frames)
+        materials[material_id] = TerrainMaterial(material_id, texture, family, float(scale), names, frames, tuple(aliases))
     return tuple(materials.values())
 
 

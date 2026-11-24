@@ -70,6 +70,18 @@ class CatalogueTests(unittest.TestCase):
         self.assertEqual(self.requests, [CATALOGUE, "/pack/ow_innesto_6_garden_mint.png",
                                          "/pack/ow_innesto_4_rock_slate.png", CATALOGUE])
 
+    def test_peer_slot_selects_one_installed_provider_by_declared_alias(self):
+        host, port = self.server.server_address
+        first, second = self.materials
+        alternate = "kiln:ore"
+        providers = {alternate: (first,), second: ()}
+        self.assertEqual(terrain_peer.peer_bindings(host, port, providers, 2),
+                         {first: alternate, second: second})
+        for invalid in ({alternate: (first, second), "spare:ore": ()},
+                        {alternate: (first,), second: (first,)}, {alternate: (), second: ()}):
+            with self.subTest(providers=invalid), self.assertRaises(ValueError):
+                terrain_peer.peer_bindings(host, port, invalid, 2)
+
     def test_wrong_missing_or_extra_materials_are_refused_before_texture_fetch(self):
         initial = self.rows
         for rows in (

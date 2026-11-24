@@ -214,7 +214,8 @@ def _definition_hash(fields):
     return hashlib.sha256(encoded).hexdigest()
 
 
-def stage_materials(stock: Path, destination: Path, materials, expected_stock_sha256: str, *, legacy_receipts=None):
+def stage_materials(stock: Path, destination: Path, materials, expected_stock_sha256: str, *,
+                    legacy_receipts=None, providers=None, wire_receipts=None):
     """Stage one pack in the supplied slot order. Describe the exact bytes used."""
     if destination.resolve().is_relative_to(stock.resolve()):
         raise ValueError("runtime pack must be outside the stock pack")
@@ -239,9 +240,16 @@ def stage_materials(stock: Path, destination: Path, materials, expected_stock_sh
             parameters = f"{material.tile_meters:.6f} {int(bool(frames))} {NATIVE_FAMILIES[material.family]}"
             # Insert the commitment immediately before IEND, after the complete IDAT stream.
             image = texture[:-12] + _receipt(digest, parameters, material.display_names, frames) + texture[-12:]
+            receipt = hashlib.sha256(image).hexdigest()
+            provider = (providers or {}).get(material.id, material.id)
+            if provider != material.id:
+                commitment = hashlib.sha256(b"Innesto terrain provider v1\0" + bytes.fromhex(receipt)
+                                            + material.id.encode("ascii") + b"\0" + provider.encode("ascii"))
+                image = texture[:-12] + _png_receipt(commitment) + texture[-12:]
+            if wire_receipts is not None:
+                wire_receipts[material.id] = hashlib.sha256(image).hexdigest() if provider != material.id else receipt
             with (blocks / f"ow_{key}.png").open("xb") as stream:
                 stream.write(image)
-            receipt = hashlib.sha256(image).hexdigest()
             if (legacy_receipts is not None and parameters != V1_PARAMETERS
                     and not frames and not material.display_names):
                 # The first family/scale writer committed the native parameters directly.

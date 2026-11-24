@@ -155,7 +155,9 @@ def run(args):
                     launch_target(image, path, inherited, plan, arguments, world_lease)
 
                 return start_with_terrain(target, executable, verified_digest, environment,
-                                         mods, profile, args.target_args, launch, args.terrain_peer, args.migrate_terrain)
+                                         mods, profile, args.target_args, launch, args.terrain_peer,
+                                         migrate=args.migrate_terrain, preview=args.preview_terrain,
+                                         remaps=args.remaps, backup=args.backup_world, packages=args.mods_dir)
 
 
 def launch_target(target, executable, inherited, plan, arguments, world_lease=None):
@@ -205,13 +207,31 @@ def main():
     parser.add_argument("--profile", required=True, type=Path, help="private trusted target profile")
     parser.add_argument("--loader", required=True, type=Path, help="Innesto shared library")
     parser.add_argument("--terrain-peer", metavar="HOST:PORT", help="preflight this terrain server before opening the client menu")
-    parser.add_argument("--migrate-terrain", action="store_true",
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--preview-terrain", action="store_true", help="preview changes to a stopped terrain world")
+    mode.add_argument("--migrate-terrain", action="store_true",
                         help="update an existing dedicated world's registry offline (use -- --data-dir WORLD)")
+    parser.add_argument("--remap-terrain", action="append", default=[], metavar="PERSISTENT_ID=PROVIDER_ID",
+                        help="explicitly select the provider of a saved slot during preview or migration")
+    parser.add_argument("--backup-world", type=Path, metavar="DIRECTORY",
+                        help="write a complete pre-migration world copy to this separate directory")
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--mod", type=Path, help="one mod shared library")
     source.add_argument("--mods-dir", type=Path, help="directory containing unpacked mod packages")
     parser.add_argument("target_args", nargs=argparse.REMAINDER, help="target arguments after --")
     args = parser.parse_args()
+    if (args.migrate_terrain or args.preview_terrain) and not args.mods_dir:
+        parser.error("offline terrain operations require --mods-dir")
+    if args.remap_terrain and not (args.migrate_terrain or args.preview_terrain):
+        parser.error("--remap-terrain requires --preview-terrain or --migrate-terrain")
+    if args.backup_world and not args.migrate_terrain:
+        parser.error("--backup-world requires --migrate-terrain")
+    args.remaps = {}
+    for assignment in args.remap_terrain:
+        stable, sep, provider = assignment.partition("=")
+        if not sep or not stable or not provider or "=" in provider or stable in args.remaps:
+            parser.error("supply one PERSISTENT_ID=PROVIDER_ID per saved material")
+        args.remaps[stable] = provider
     if args.target_args[:1] == ["--"]:
         args.target_args = args.target_args[1:]
     try:

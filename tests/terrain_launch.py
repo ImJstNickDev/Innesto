@@ -19,7 +19,7 @@ import zlib
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = Path(sys.argv.pop(1)).resolve()
 sys.path.insert(0, str(ROOT / "tools"))
-from adapters.a1_2_10.terrain import game_key, stage_pack, stock_fingerprint
+from adapters.a1_2_10.terrain import game_key, stage_materials, stage_pack, stock_fingerprint
 from innesto_packages import select_packages
 
 
@@ -101,12 +101,12 @@ int main(int argc, char **argv) {
         (cls.pack / "blocks").mkdir(parents=True)
         (cls.pack / "pack.txt").write_text("resolution 32\ntile ow_fixture 1.000000 0 roche\n")
         cls.packages = cls.base / "mods"
-        for name in ("copperfield", "tidepool", "reedbed", "aster"):
+        for name in ("copperfield", "tidepool", "reedbed", "aster", "kiln"):
             out = cls.base / ("build-" + name)
             subprocess.run(["cmake", "-S", ROOT / "examples" / name, "-B", out,
                             "-DINNESTO_INCLUDE_DIR=" + str(ROOT / "include")], check=True, stdout=subprocess.PIPE)
             subprocess.run(["cmake", "--build", out], check=True, stdout=subprocess.PIPE)
-            prefix = cls.base / "v2-packages" if name in ("reedbed", "aster") else cls.packages
+            prefix = cls.base / "v2-packages" if name in ("reedbed", "aster", "kiln") else cls.packages
             subprocess.run(["cmake", "--install", out, "--prefix", prefix], check=True, stdout=subprocess.PIPE)
         shutil.copyfile(cls.packages / "copperfield/assets/ochre.png", cls.pack / "blocks/ow_fixture.png")
 
@@ -252,6 +252,20 @@ int main(int argc, char **argv) {
                 path.write_text(json.dumps(manifest))
                 self.assert_refused(invoke())
                 path.write_text(original)
+                remapped = self.instance / "remapped-pack"
+                stage_materials(self.stock, remapped, materials, stock, providers={"copperfield:ochre": "kiln:ochre"})
+                original_package = self.instance / "original-copperfield"
+                (self.mods / "copperfield").rename(original_package)
+                shutil.copytree(self.base / "v2-packages/kiln", self.mods / "kiln")
+                self.assert_refused(invoke())  # replacement client against the original server
+                (served / "pack").unlink()
+                (served / "pack").symlink_to(remapped / "blocks", target_is_directory=True)
+                matched = invoke()
+                self.assertEqual(matched.returncode, 0, matched.stderr)
+                self.assertIn("Innesto kiln initialized", matched.stderr)
+                (self.mods / "kiln").rename(self.instance / "disabled-kiln")
+                original_package.rename(self.mods / "copperfield")
+                self.assert_refused(invoke())  # original client against the replacement server
                 self.assert_refused(invoke(("--play", "127.0.0.1:24712")))
                 catalogue.write_text(json.dumps({"materials": rows[:-1]}))
                 self.assert_refused(invoke())
@@ -315,6 +329,57 @@ int main(int argc, char **argv) {
         self.assert_refused(migrate(*args))
         self.assertEqual({p.name: p.read_bytes() for p in self.world.iterdir()}, previous)
         self.assertEqual(terrain_save.read_bytes(), b"existing terrain and inventory")
+
+    def test_provider_transfer_keeps_slots_and_game_bytes_but_changes_peer_proof(self):
+        args = ("--data-dir", str(self.world))
+        original = self.launch(*args)
+        self.assert_loaded(original)
+        registry = self.world / "innesto-terrain-v1.json"
+        before = registry.read_bytes()
+        save = self.world / "player"
+        save.write_bytes(b"saved inventory")
+        backup = self.instance / "pre-transfer"
+        (self.mods / "copperfield").rename(self.instance / "original")
+        shutil.copytree(self.base / "v2-packages/kiln", self.mods / "kiln")
+        def offline(*options):
+            cmd = self.command(*args)
+            cmd[cmd.index("--"):cmd.index("--")] = options
+            return subprocess.run(cmd, cwd=self.instance, capture_output=True, text=True, timeout=20,
+                                  env={**os.environ, "XDG_CACHE_HOME": str(self.instance / "cache")})
+
+        transfer = ["--remap-terrain", "copperfield:ochre=kiln:ochre"]
+        self.assert_refused(self.launch(*args))
+        self.assert_refused(offline("--migrate-terrain"))
+        self.assert_refused(offline("--migrate-terrain", *transfer))
+        preview = offline("--preview-terrain", *transfer)
+        self.assertEqual(preview.returncode, 0, preview.stderr)
+        self.assertIn("slot 1 copperfield:ochre", preview.stdout)
+        self.assertIn("kiln:ochre", preview.stdout)
+        self.assertNotIn("initialized", preview.stderr)
+        self.assertEqual(registry.read_bytes(), before)
+        self.assertFalse(backup.exists())
+        for unsafe in (self.world / "backup", self.mods / "backup", self.host.parent / "backup"):
+            self.assert_refused(offline("--migrate-terrain", *transfer, "--backup-world", unsafe))
+            self.assertFalse(unsafe.exists())
+        applied = offline("--migrate-terrain", *transfer, "--backup-world", backup)
+        self.assertEqual(applied.returncode, 0, applied.stderr)
+        self.assertEqual((backup / registry.name).read_bytes(), before)
+        self.assertEqual((backup / save.name).read_bytes(), save.read_bytes())
+        after = self.launch(*args)
+        self.assertEqual(after.returncode, 0, after.stderr)
+        self.assertIn("Innesto kiln initialized", after.stderr)
+        first = original.stdout.splitlines()[2:]
+        second = after.stdout.splitlines()[2:]
+        self.assertEqual(first[::2], second[::2])  # stock and unrelated terrain
+        old_key, old_png = first[1].split()
+        new_key, new_png = second[1].split()
+        self.assertEqual(old_key, new_key)
+        self.assertNotEqual(new_png, old_png)
+        self.assertEqual(png_scanlines(bytes.fromhex(old_png)), png_scanlines(bytes.fromhex(new_png)))
+        committed = registry.read_bytes()
+        again = offline("--migrate-terrain", *transfer)
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertEqual(registry.read_bytes(), committed)
 
     def test_nonempty_world_without_registry(self):
         self.world.mkdir()

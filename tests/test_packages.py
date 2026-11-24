@@ -102,6 +102,33 @@ class PackageTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, key):
                     select_packages(self.mods, "server")
 
+    def test_only_v3_accepts_explicit_namespaced_aliases(self):
+        directory, _ = self.terrain_package("kiln")
+        path = directory / MANIFEST
+        data = json.loads(path.read_text())
+        content = data["content"]
+        material = content["terrain"][0]
+        material["aliases"] = ["copper:ore"]
+        for version in (1, 2):
+            content["version"] = version
+            path.write_text(json.dumps(data))
+            self.refused("unknown field", "aliases")
+        content["version"] = 3
+        path.write_text(json.dumps(data))
+        self.assertEqual(select_packages(self.mods, "client")[0].terrain[0].aliases, ("copper:ore",))
+        for invalid in (None, "ore", [1], ["ore"], ["kiln:ore"], ["c:o", "c:o"], ["c:" + "x" * 256]):
+            with self.subTest(aliases=invalid):
+                material["aliases"] = invalid
+                path.write_text(json.dumps(data))
+                with self.assertRaises(ValueError):
+                    select_packages(self.mods, "server")
+
+        material.update(id="kiln:x" + "_" * 130, aliases=["copper:ore"])
+        path.write_text(json.dumps(data))
+        for side in ("client", "server"):
+            with self.subTest(environment=side), self.assertRaisesRegex(ValueError, "too long"):
+                select_packages(self.mods, side)
+
     def test_v2_frames_resolve_in_author_order_and_stay_inside_assets(self):
         root, image = self.terrain_package("copper")
         path = root / MANIFEST
@@ -129,7 +156,7 @@ class PackageTests(unittest.TestCase):
         tile = content["terrain"][0]
         invalid = [
             (None, "content"), ({}, "version"), ({**content, "version": True}, "version"),
-            ({**content, "version": 1.0}, "version"), ({**content, "version": 3}, "version"),
+            ({**content, "version": 1.0}, "version"), ({**content, "version": 4}, "version"),
             ({**content, "unexpected": 1}, "unexpected"),
             ({"version": 1, "terrain": [tile]}, "assets"),
             ({"version": 1, "assets": "assets"}, "terrain"),
