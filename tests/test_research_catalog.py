@@ -66,6 +66,24 @@ class Catalogue(unittest.TestCase):
         content.write_bytes(b"new")
         self.run_cli("verify", self.db, "--root", self.root, "--archived", ok=False)
 
+    def test_legacy_snapshot_must_meet_current_rules_before_reuse(self):
+        self.ingest()
+        review = self.root / "review.json"
+        for field, invalid in (("role", None), ("signature", "void(void)")):
+            with self.subTest(field=field):
+                value = self.record[field]
+                self.record[field] = invalid
+                doc = json.dumps(self.snapshot, sort_keys=True, separators=(",", ":"))
+                digest = hashlib.sha256(doc.encode()).hexdigest()
+                with sqlite3.connect(self.db) as db:
+                    db.execute("UPDATE snapshots SET digest=?,document=?", (digest, doc))
+                review.write_text(json.dumps({"format": 1, "revision": 1, "snapshot": digest,
+                    "reviewer": "maintainer", "grants": [{"key": "owned.rule", "mode": "binding",
+                                                          "basis": "Original fixture"}]}))
+                self.run_cli("export", self.db, review, "--root", self.root, ok=False)
+                self.ingest(False)
+                self.record[field] = value
+
     def test_binding_kind_requires_its_cooperative_signature(self):
         self.record["signature"] = "void(void)"
         self.ingest(False)

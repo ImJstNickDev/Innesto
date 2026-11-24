@@ -136,7 +136,7 @@ def verify_archives(db, rev, root, snapshot):
             "unexpected archive index entries")
 
 
-def insert_record(db, rev, r, artifacts, targets):
+def record_values(r, artifacts, targets):
     fields(r, ("key", "semantic", "role", "subsystem", "kind", "state", "confidence", "claim", "limits", "evidence"),
            ("entry", "signature", "signature_state", "types", "binding"))
     choice(r["role"], targets, "record role for this snapshot")
@@ -175,15 +175,12 @@ def insert_record(db, rev, r, artifacts, targets):
         require(prototype == COOPERATIVE_SIGNATURES[binding["kind"]], "signature differs from cooperative declaration")
         require(r["kind"] == "function" and r["state"] == status == "verified", "binding must have a verified ABI")
         require(type(binding["slot"]) is int and 0 <= binding["slot"] < 2**32, "invalid cooperative slot")
-    db.execute("INSERT INTO records VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-               (rev, *(r[k] for k in ("key", "semantic", "role", "subsystem", "kind", "state", "confidence",
-                                       "claim", "limits")), entry, prototype, status, encode(types),
-                encode(binding) if binding else None))
-    db.executemany("INSERT INTO evidence VALUES(?,?,?,?)",
-                   [(rev, r["key"], e["path"], e["method"]) for e in evidence])
+    return (*(r[k] for k in ("key", "semantic", "role", "subsystem", "kind", "state", "confidence",
+                              "claim", "limits")), entry, prototype, status, encode(types),
+            encode(binding) if binding else None)
 
 
-def import_snapshot(db, data, root):
+def validate_snapshot(data):
     fields(data, ("format", "revision", "game", "platform", "targets", "artifacts", "records", "links", "needs"), ("archives",))
     rev = data["revision"]
     require(type(data["format"]) is int and data["format"] == FORMAT and positive(rev), "unknown format or revision")
@@ -192,6 +189,27 @@ def import_snapshot(db, data, root):
     require(isinstance(targets, dict) and targets and targets.keys() <= ROLES, "unknown or missing target roles")
     require(all(isinstance(v, str) and HASH.fullmatch(v) for v in targets.values()), "invalid target identities")
     require(isinstance(artifacts, dict) and artifacts, "missing evidence manifest")
+    require(array(data["records"]), "empty research snapshot")
+    rows = [record_values(r, artifacts, targets) for r in data["records"]]
+    keys = {row[0] for row in rows}
+    require(len(keys) == len(rows), "duplicate record key")
+    for link in array(data["links"]):
+        fields(link, ("source", "target", "relation"))
+        check_id(link["relation"])
+        require(string(link["source"]) and link["source"] in keys and string(link["target"]) and link["target"] in keys,
+                "missing relationship endpoint")
+    for need in array(data["needs"]):
+        fields(need, ("issue", "key", "requirement"))
+        require(string(need["key"]) and need["key"] in keys and positive(need["issue"]) and string(need["requirement"]),
+                "invalid issue prerequisite")
+    for manifest in array(data.get("archives", [])):
+        require(isinstance(manifest, str) and manifest in artifacts, "archive must be a pinned evidence manifest")
+    return rows
+
+
+def import_snapshot(db, data, root):
+    rows = validate_snapshot(data)
+    rev, targets, artifacts = data["revision"], data["targets"], data["artifacts"]
     verify_files(root, artifacts.items())
     document = encode(data)
     digest = hashlib.sha256(document.encode()).hexdigest()
@@ -204,23 +222,16 @@ def import_snapshot(db, data, root):
     db.execute("INSERT INTO snapshots VALUES(?,?,?,?,?)", (rev, digest, data["game"], data["platform"], document))
     db.executemany("INSERT INTO targets VALUES(?,?,?)", [(rev, k, v) for k, v in targets.items()])
     db.executemany("INSERT INTO artifacts VALUES(?,?,?)", [(rev, k, v) for k, v in artifacts.items()])
-    for manifest in array(data.get("archives", [])):
-        require(isinstance(manifest, str) and manifest in artifacts, "archive must be a pinned evidence manifest")
+    for manifest in data.get("archives", []):
         db.executemany("INSERT INTO archive_files VALUES(?,?,?,?,?)",
                        ((rev, manifest, *entry) for entry in archive_entries(root, manifest, artifacts[manifest])))
-    require(array(data["records"]), "empty research snapshot")
-    for rec in data["records"]:
-        insert_record(db, rev, rec, artifacts, targets)
-    for link in array(data["links"]):
-        fields(link, ("source", "target", "relation"))
-        for field in ("source", "target", "relation"):
-            check_id(link[field])
-        db.execute("INSERT INTO links VALUES(?,?,?,?)", (rev, link["source"], link["target"], link["relation"]))
-    for need in array(data["needs"]):
-        fields(need, ("issue", "key", "requirement"))
-        check_id(need["key"])
-        require(positive(need["issue"]) and string(need["requirement"]), "invalid issue prerequisite")
-        db.execute("INSERT INTO needs VALUES(?,?,?,?)", (rev, need["issue"], need["key"], need["requirement"]))
+    db.executemany("INSERT INTO records VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", ((rev, *row) for row in rows))
+    db.executemany("INSERT INTO evidence VALUES(?,?,?,?)",
+                   ((rev, r["key"], e["path"], e["method"]) for r in data["records"] for e in r["evidence"]))
+    db.executemany("INSERT INTO links VALUES(?,?,?,?)",
+                   ((rev, link["source"], link["target"], link["relation"]) for link in data["links"]))
+    db.executemany("INSERT INTO needs VALUES(?,?,?,?)",
+                   ((rev, n["issue"], n["key"], n["requirement"]) for n in data["needs"]))
     return digest
 
 
@@ -239,6 +250,7 @@ def export(db, review, root):
     require(rev == db.execute("SELECT max(revision) FROM snapshots").fetchone()[0], "review is superseded")
     digest, snap = original_snapshot(db, rev)
     require(digest == review["snapshot"], "review does not match this snapshot")
+    validate_snapshot(snap)
     verify_files(root, snap["artifacts"].items())
     by_key = {r["key"]: r for r in snap["records"]}
     output = []
@@ -373,6 +385,7 @@ def main():
                     _, result = original_snapshot(db, rev)
                 elif args.command == "verify":
                     _, original = original_snapshot(db, rev)
+                    validate_snapshot(original)
                     verify_files(args.root, original["artifacts"].items())
                     if args.archived:
                         verify_archives(db, rev, args.root, original)
