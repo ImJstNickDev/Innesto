@@ -1,9 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="88" height="88" viewBox="0 0 88 88">
-  <title>Innesto</title>
-  <rect width="88" height="88" rx="20" fill="#193c37"/>
-  <g fill="none" stroke-width="10" stroke-linecap="square" stroke-linejoin="round">
-    <path stroke="#ecead9" d="M35 67V45L21 31"/>
-    <path stroke="#8edde0" d="M39 43 62 20"/>
-  </g>
-  <path d="m29 44 15-8 3 6-15 8z" fill="#dfae66" stroke="#193c37" stroke-width="2"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96" role="img" aria-labelledby="title" aria-describedby="desc">
+  <title id="title">Innesto</title>
+  <desc id="desc">A leafy green shoot fitted into the cut face of a golden tree stump.</desc>
+
+  <rect width="96" height="96" rx="23" fill="#183c34"/>
+
+  <!-- The sloping cut face and its open cleft are part of the stock silhouette. -->
+  <path fill="#e6ae6b" d="M19 49c7 2 18 2 29-1l-5 18 14-21 6-3
+    c-5 10-9 20-9 28 0 4 2 8 5 11-10-3-21-3-32 0
+    4-6 5-12 3-18-2-5-6-10-11-14Z"/>
+  <path fill="#ffe1a4" d="M19 45c5-8 26-13 41-10l-9 8
+    c-12 5-24 7-32 4-1 0-1-1 0-2Z"/>
+  <path fill="#183c34" d="M25 45c4-4 12-7 20-7-7 2-12 4-16 7Z"/>
+
+  <!-- The scion tapers into the cleft. The open slit follows the main leaf vein. -->
+  <path fill="#b7e490" d="M46 57c3-10 6-18 11-25
+    -8 0-13-6-14-15 8 2 15 7 16 13
+    4-10 12-15 24-18-1 14-7 25-23 25
+    4-6 9-12 15-17-12 8-20 21-29 37Z"/>
 </svg>
