@@ -5,6 +5,12 @@ if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR NOT CMAKE_SYSTEM_PROCESSOR MATCHES 
     message(FATAL_ERROR "This Innesto target requires Linux x86-64")
 endif()
 
+# Private adapter/host contract. Public mod SDKs do not link this library.
+add_library(innesto-native-adapter STATIC src/native_adapter.c)
+target_include_directories(innesto-native-adapter PUBLIC src)
+target_compile_features(innesto-native-adapter PUBLIC c_std_11)
+set_target_properties(innesto-native-adapter PROPERTIES POSITION_INDEPENDENT_CODE ON C_VISIBILITY_PRESET hidden)
+
 add_library(innesto-bootstrap MODULE src/bootstrap.c)
 set_target_properties(innesto-bootstrap PROPERTIES PREFIX "" C_VISIBILITY_PRESET hidden)
 target_compile_features(innesto-bootstrap PRIVATE c_std_11)
@@ -20,6 +26,7 @@ add_custom_target(innesto-loader ALL
 include(CTest)
 if(BUILD_TESTING)
     find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
+    add_subdirectory(tests/mappings)
     add_executable(innesto-test-host tests/host.c)
     add_library(innesto-test-prior MODULE tests/prior.c)
     add_library(innesto-test-reject MODULE tests/reject.c)

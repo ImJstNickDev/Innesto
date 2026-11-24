@@ -4,6 +4,11 @@ on:
   pull_request:
     branches: ['game/a1.2.10']
   workflow_dispatch:
+    inputs:
+      gum_probe:
+        description: Run the pinned Gum devkit against the original isolated fixture
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -22,3 +27,15 @@ jobs:
         run: cmake --build build/native --parallel
       - name: Exercise the example and target checks
         run: ctest --test-dir build/native --output-on-failure
+
+      - name: Exercise Gum on the stripped original fixture
+        if: github.event_name == 'workflow_dispatch' && inputs.gum_probe
+        run: |
+          mkdir -p build/gum-devkit
+          curl -fsSL --retry 3 -o build/gum-devkit/devkit.tar.xz \
+            https://github.com/frida/frida/releases/download/17.9.11/frida-gum-devkit-17.9.11-linux-x86_64.tar.xz
+          echo '33c82c9849c2d7d540e9995dc756dbed453dbf993af894fb15d963025de59dd8  build/gum-devkit/devkit.tar.xz' | sha256sum --check
+          tar -xf build/gum-devkit/devkit.tar.xz -C build/gum-devkit ./frida-gum.h ./libfrida-gum.a
+          cmake -S . -B build/native -DINNESTO_GUM_DEVKIT="$PWD/build/gum-devkit"
+          cmake --build build/native --target innesto-gum-probe
+          ctest --test-dir build/native -V -R '^native-gum-probe$'
