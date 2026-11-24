@@ -42,7 +42,7 @@ class Environments(unittest.TestCase):
         path.write_text(json.dumps(profile))
         with subprocess.Popen([ROOT / "tools/innesto-run", "--profile", path, "--loader",
                                BUILD / "innesto-bootstrap.so", "--mods-dir", self.packages],
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as proc:
+                              cwd=self.work, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as proc:
             stdout, stderr = proc.communicate(timeout=10)
             return proc.returncode, proc.pid, stdout, stderr
 

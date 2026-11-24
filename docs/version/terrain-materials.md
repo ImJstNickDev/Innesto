@@ -62,11 +62,13 @@ Start a client with a legitimate local game directory and its normal licensed se
 ```sh
 "$innesto_root/tools/innesto-run" --profile "$client_profile" \
   --loader "$innesto_root/build/native/innesto-bootstrap.so" \
-  --mods-dir "$innesto_root/build/terrain-mods" -- \
-  --play 127.0.0.1:24710 --game-dir "$client_game_dir"
+  --mods-dir "$innesto_root/build/terrain-mods" --terrain-peer 127.0.0.1:24710 -- \
+  --game-dir "$client_game_dir"
 ```
 
-Before starting the client, Innesto reads the chosen server's dashboard catalogue and compares material names, absolute slots and served textures. The default dashboard TCP port is the game port plus one. Set `terrainDashboardPort` in the client profile for a different dashboard port. The client must be able to read that dashboard. These examples use loopback. The preflight applies to the specified direct connection. It is a compatibility check at launch, so restart Innesto to change servers. The game retains its own authentication and admission rules.
+Choose **Multiplayer → Direct connect** in the visible window and enter the same address, `127.0.0.1:24710`. Openworld’s own `--play HOST:PORT` starts a hidden direct client for automated sessions. Innesto also checks the peer supplied by that flag.
+
+Before starting the client, Innesto reads the chosen server's dashboard catalogue and compares material names, absolute slots and served textures. The default dashboard TCP port is the game port plus one. Set `terrainDashboardPort` in the client profile for a different dashboard port. The client must be able to read that dashboard. These examples use loopback. The preflight applies to the selected address. Opening the menu does not restrict the game’s other server choices. It is a compatibility check at launch, so restart Innesto to change servers. The game retains its own authentication and admission rules.
 
 ## Reopen and back up a world
 

@@ -151,14 +151,14 @@ def run(args):
             # with one or more of stdin, stdout and stderr closed.
             fd = fcntl.fcntl(loader.fileno(), fcntl.F_DUPFD_CLOEXEC, 3)
             with os.fdopen(fd, "rb") as inherited, mod_list(environment, verified_digest, mods) as plan:
-                def launch(image, path, arguments):
-                    launch_target(image, path, inherited, plan, arguments)
+                def launch(image, path, arguments, world_lease=None):
+                    launch_target(image, path, inherited, plan, arguments, world_lease)
 
                 return start_with_terrain(target, executable, verified_digest, environment,
-                                         mods, profile, args.target_args, launch)
+                                         mods, profile, args.target_args, launch, args.terrain_peer)
 
 
-def launch_target(target, executable, inherited, plan, arguments):
+def launch_target(target, executable, inherited, plan, arguments, world_lease=None):
     fd = inherited.fileno()
     preload = f"/proc/self/fd/{fd}"
     with open(preload, "rb") as proc_entry:
@@ -175,6 +175,11 @@ def launch_target(target, executable, inherited, plan, arguments):
     env["INNESTO_INIT_PID"] = str(os.getpid())
     env.pop("INNESTO_MOD_PATH", None)
     env["INNESTO_MOD_LIST_FD"] = str(plan.fileno())
+    if world_lease is None:
+        env.pop("INNESTO_WORLD_LEASE_FD", None)
+    else:
+        env["INNESTO_WORLD_LEASE_FD"] = str(world_lease)
+        os.set_inheritable(world_lease, True)
     os.set_inheritable(fd, True)
     os.set_inheritable(plan.fileno(), True)
     os.execve(target.fileno(), [executable, *arguments], env)
@@ -199,6 +204,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", required=True, type=Path, help="private trusted target profile")
     parser.add_argument("--loader", required=True, type=Path, help="Innesto shared library")
+    parser.add_argument("--terrain-peer", metavar="HOST:PORT", help="preflight this terrain server before opening the client menu")
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--mod", type=Path, help="one mod shared library")
     source.add_argument("--mods-dir", type=Path, help="directory containing unpacked mod packages")

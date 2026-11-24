@@ -1,21 +1,26 @@
 """Exercise the public launcher with independent packages and an original asset-reading host."""
+from functools import partial
 import hashlib
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
 import select
 import shutil
+import socket
 import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = Path(sys.argv.pop(1)).resolve()
 sys.path.insert(0, str(ROOT / "tools"))
-from adapters.a1_2_10.terrain import stock_fingerprint
+from adapters.a1_2_10.terrain import game_key, stage_pack, stock_fingerprint
+from innesto_packages import select_packages
 
 
 def png_scanlines(data):
@@ -44,7 +49,25 @@ class TerrainLaunch(unittest.TestCase):
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-int main(void) {
+int main(int argc, char **argv) {
+    const char *helper = getenv("INNESTO_TEST_HELPER_FD");
+    if (helper && argc == 2 && strcmp(argv[1], "--fixture-helper") == 0) {
+        int fd = atoi(helper);
+        char done;
+        close(STDIN_FILENO);
+        close(STDOUT_FILENO);
+        close(STDERR_FILENO);
+        if (setsid() < 0 || write(fd, "R", 1) != 1) return 1;
+        return read(fd, &done, 1) < 0;
+    }
+    if (helper) {
+        pid_t pid = fork();
+        if (pid < 0) return 1;
+        if (pid == 0) {
+            execl("/proc/self/exe", argv[0], "--fixture-helper", (char *)NULL);
+            _exit(1);
+        }
+    }
     printf("started %ld\n", (long)getpid());
     fflush(stdout);
     if (getenv("INNESTO_TEST_HOLD") && getchar() == EOF) return 1;
@@ -153,6 +176,39 @@ int main(void) {
         self.assertEqual(lock.read_bytes(), saved)
         self.assertEqual(stock_fingerprint(self.stock), stock_fingerprint(self.pack))
 
+    def test_visible_client_checks_chosen_peer_before_startup(self):
+        served = self.instance / "dashboard"
+        (served / "api").mkdir(parents=True)
+        materials = [m for package in select_packages(self.mods, "client") for m in package.terrain]
+        stock = self.settings["terrainPackSha256"]
+        generated = self.instance / "peer-pack"
+        stage_pack(self.stock, generated, materials, stock)
+        (served / "pack").symlink_to(generated / "blocks", target_is_directory=True)
+        rows = [{"id": 0, "key": "fixture"}]
+        for index, material in enumerate(materials, 1):
+            key = game_key(material.id)
+            rows.append({"id": index, "key": key, "texture": f"/pack/ow_{key}.png"})
+        catalogue = served / "api/info"
+        catalogue.write_text(json.dumps({"materials": rows}))
+        with ThreadingHTTPServer(("127.0.0.1", 0), partial(SimpleHTTPRequestHandler, directory=served)) as server:
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                self.settings.update(environment="client", terrainDashboardPort=server.server_port)
+                args = self.command()
+                address = "127.0.0.1:24710"
+                args[args.index("--"):args.index("--")] = ["--terrain-peer", address]
+                def invoke(extra=()):
+                    return subprocess.run([*args, *extra], cwd=self.instance, capture_output=True,
+                                          text=True, timeout=10, env={**os.environ, "XDG_CACHE_HOME": str(self.instance / "cache")})
+                self.assert_loaded(invoke())
+                self.assert_refused(invoke(("--play", "127.0.0.1:24712")))
+                catalogue.write_text(json.dumps({"materials": rows[:-1]}))
+                self.assert_refused(invoke())
+            finally:
+                server.shutdown()
+                thread.join()
+
     def test_nonempty_world_without_registry(self):
         self.world.mkdir()
         (self.world / "world-data").write_text("previous save")
@@ -248,6 +304,46 @@ int main(void) {
         finally:
             process.communicate(input="\n", timeout=10)
         self.assert_loaded(self.launch(*args))
+
+    def test_default_world_lease_precedes_first_package_free_start(self):
+        installed, profile = self.mods, self.settings.copy()
+        self.mods = self.instance / "empty-mods"
+        self.mods.mkdir()
+        del self.settings["terrainPackSha256"], self.settings["terrainBaseCount"]
+        world = self.instance / "owserver_data"
+        for args in (("--help",), ("--verify-world", "a", "b")):
+            with self.subTest(args=args):
+                result = self.launch(*args)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(world.exists())
+        env = {**os.environ, "XDG_CACHE_HOME": str(self.instance / "cache"), "INNESTO_TEST_HOLD": "1"}
+        process = subprocess.Popen(self.command(), cwd=self.instance, env=env, text=True,
+                                   stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            self.assertTrue(select.select([process.stdout], [], [], 15)[0])
+            self.assertRegex(process.stdout.readline(), r"^started [0-9]+\n$")
+            self.mods, self.settings = installed, profile
+            self.assert_refused(self.launch())
+            self.assertTrue(world.is_dir())
+            self.assertFalse((world / "innesto-terrain-v1.json").exists())
+        finally:
+            process.communicate(input="\n", timeout=10)
+        self.assert_loaded(self.launch())
+
+    def test_detached_exec_helper_releases_world_as_game_exits(self):
+        args = ("--data-dir", str(self.world))
+        client, helper = socket.socketpair()
+        with client, helper:
+            env = {**os.environ, "XDG_CACHE_HOME": str(self.instance / "cache"),
+                   "INNESTO_TEST_HELPER_FD": str(helper.fileno())}
+            result = subprocess.run(self.command(*args), cwd=self.instance, env=env, text=True,
+                                    capture_output=True, timeout=15, pass_fds=(helper.fileno(),))
+            self.assert_loaded(result)
+            helper.close()
+            client.settimeout(5)
+            self.assertEqual(client.recv(1), b"R")
+            # The helper stays alive on the socket throughout the second launch.
+            self.assert_loaded(self.launch(*args))
 
 
 if __name__ == "__main__":

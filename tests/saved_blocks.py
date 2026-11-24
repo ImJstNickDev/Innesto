@@ -50,7 +50,7 @@ class SavedBlocks(unittest.TestCase):
         return subprocess.Popen([ROOT / "tools/innesto-run", "--profile", self.profile,
                                  "--loader", BUILD / "innesto-bootstrap.so", "--mods-dir", self.work / "packages"],
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                env=env, text=True)
+                                cwd=self.work, env=env, text=True)
 
     def test_binding_available(self):
         with self.launch() as proc:

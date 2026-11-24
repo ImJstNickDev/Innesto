@@ -9,57 +9,18 @@ from pathlib import Path
 import shutil
 import signal
 import tempfile
-from urllib.parse import urlsplit
 
-from adapters.a1_2_10 import terrain
+from adapters.a1_2_10 import terrain, terrain_target as routing
 from innesto_packages import unique_keys
 
 
 REGISTRY = "innesto-terrain-v1.json"
 
 
-def option(arguments, flag):
-    positions = [i for i, value in enumerate(arguments) if value == flag]
-    if not positions:
-        return None
-    if len(positions) != 1 or positions[0] + 1 == len(arguments) or arguments[positions[0] + 1].startswith("-"):
-        raise ValueError(f"terrain cannot determine an unambiguous value for {flag}")
-    return arguments[positions[0] + 1]
-
-
-def server_world(arguments, active):
-    """Use the server's data root. Cover alternate config-relative roots when checking legacy launches."""
-    data = option(arguments, "--data-dir")
-    if data:
-        return Path(data).resolve()
-    instance = Path(arguments[0]) if arguments and not arguments[0].startswith("-") else Path.cwd()
-    config = Path(option(arguments, "--config") or instance)
-    if config.is_dir():
-        config = config / "server.json"
-    configured = "owserver_data"
-    if config.is_file():
-        try:
-            configured = json.loads(config.read_bytes()).get("dataDir", configured)
-            if not isinstance(configured, str) or not configured:
-                raise ValueError("invalid data directory")
-        except (AttributeError, UnicodeError, ValueError):
-            if active:
-                raise ValueError("terrain requires a valid server config or an explicit --data-dir") from None
-            configured = "owserver_data"
-    paths = [(base / configured).resolve() for base in (Path.cwd(), config.parent, instance)]
-    if active and len(set(paths)) > 1:
-        raise ValueError("supply --data-dir for terrain with a separate server instance or config directory")
-    if not active:
-        for path in paths:
-            if os.path.lexists(path / REGISTRY):
-                return path
-    return paths[0]
-
-
 @contextmanager
 def world_registry(world, receipt):
     world.mkdir(parents=True, exist_ok=True)
-    with directory_lock(world):
+    with directory_lock(world) as lease:
         path = world / REGISTRY
         if os.path.lexists(path):
             if path.is_symlink() or not path.is_file():
@@ -88,36 +49,24 @@ def world_registry(world, receipt):
                 os.fsync(fd)
             finally:
                 os.close(fd)
-        yield
+        yield lease
 
 
 @contextmanager
 def directory_lock(directory):
     fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
     try:
+        if fd < 3:
+            moved = fcntl.fcntl(fd, fcntl.F_DUPFD_CLOEXEC, 3)
+            os.close(fd)
+            fd = moved
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise ValueError("another Innesto launcher holds this terrain world") from None
-        # A surviving game must retain the lease if its supervisor is killed.
-        os.set_inheritable(fd, True)
-        yield
+        yield fd
     finally:
         os.close(fd)
-
-
-def peer_address(arguments, profile_port):
-    address = option(arguments, "--play")
-    if not address:
-        raise ValueError("terrain clients require a direct --play HOST:PORT connection")
-    parsed = urlsplit("//" + address)
-    if (not parsed.hostname or parsed.path or parsed.query or parsed.fragment or parsed.username is not None
-            or parsed.password is not None):
-        raise ValueError("invalid terrain server address")
-    port = profile_port if profile_port is not None else (parsed.port or 24710) + 1
-    if type(port) is not int or not 1 <= port <= 65535:
-        raise ValueError("invalid terrain dashboard port")
-    return parsed.hostname, port
 
 
 def copy_assets(source, destination, stock):
@@ -163,20 +112,13 @@ def run_supervised(action):
     return code if code >= 0 else 128 - code
 
 
-def start(target, executable, digest, environment, mods, profile, arguments, launch):
+def start(target, executable, digest, environment, mods, profile, arguments, launch, selected_peer=None):
     materials = sorted((m for mod in mods for m in mod.terrain), key=lambda m: m.id)
+    if selected_peer is not None and (environment != "client" or not materials):
+        raise ValueError("--terrain-peer requires a client with shared terrain packages")
     world = None
     if environment == "server":
-        for mode in ("--solo", "--ghost", "--terrain-worker", "--compact-world", "--verify-world"):
-            operand = option(arguments, mode)
-            if operand is not None:
-                roots = [Path(operand)]
-                if mode == "--verify-world" and arguments.index(mode) + 2 < len(arguments):
-                    roots.append(Path(arguments[arguments.index(mode) + 2]))
-                if materials or any(os.path.lexists(root / entry / REGISTRY)
-                                    for root in roots for entry in (".", "cache")):
-                    raise ValueError("terrain registration requires a normal dedicated server")
-        world = server_world(arguments, bool(materials))
+        world = routing.world_for_launch(arguments, bool(materials), REGISTRY)
         if not materials and os.path.lexists(world / REGISTRY):
             raise ValueError("terrain packages missing for this world; restore them before opening it")
     if not materials:
@@ -184,12 +126,12 @@ def start(target, executable, digest, environment, mods, profile, arguments, lau
             raise ValueError("terrain profile requires its shared material packages")
         # A package-free launch racing a first material launch must use the same
         # lease. Keep legacy utility invocations from creating new save paths.
-        if world is not None and (world.is_dir() or "--data-dir" in arguments):
+        if world is not None and routing.opens_dedicated_world(arguments):
             world.mkdir(parents=True, exist_ok=True)
-            with directory_lock(world):
+            with directory_lock(world) as lease:
                 if os.path.lexists(world / REGISTRY):
                     raise ValueError("terrain packages missing for this world")
-                launch(target, executable, arguments)
+                launch(target, executable, arguments, lease)
         else:
             launch(target, executable, arguments)
         return 0
@@ -219,19 +161,14 @@ def start(target, executable, digest, environment, mods, profile, arguments, lau
         with image.open("rb") as staged:
             if hashlib.file_digest(staged, "sha256").hexdigest() != digest:
                 raise ValueError("staged terrain target identity changed")
-            def play():
-                launch(staged, str(image), arguments)
             if world is None:
                 from adapters.a1_2_10.terrain_peer import verify_peer
-                verify_peer(*peer_address(arguments, profile.get("terrainDashboardPort")), textures, base_count)
-                return run_supervised(play)
-            arguments = list(arguments)
-            if "--data-dir" in arguments:
-                arguments[arguments.index("--data-dir") + 1] = str(world)
-            else:
-                arguments.extend(["--data-dir", str(world)])
+                peer = routing.peer_address(arguments, profile.get("terrainDashboardPort"), selected_peer)
+                verify_peer(*peer, textures, base_count)
+                return run_supervised(lambda: launch(staged, str(image), arguments))
+            arguments = routing.bind_world(arguments, world)
             receipt = {"schema": 1, "game": "a1.2.10", "platform": "linux-x86_64",
                        "server": digest, "stock": baseline, "baseCount": base_count,
                        "materials": [[key, value] for key, value in textures.items()]}
-            with world_registry(world, receipt):
-                return run_supervised(play)
+            with world_registry(world, receipt) as lease:
+                return run_supervised(lambda: launch(staged, str(image), arguments, lease))
