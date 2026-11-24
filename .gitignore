@@ -1,0 +1,8 @@
+# Local environments and generated documentation
+.venv/
+__pycache__/
+/site/
+
+# Local maintainer workspace and native build outputs
+/.private/
+/build/
