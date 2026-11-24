@@ -8,11 +8,14 @@ API.
 
 | Openworld | Platform | Innesto status |
 | --- | --- | --- |
-| a1.2.10 | Linux x86-64 | Initial development target |
+| a1.2.10 | Linux x86-64 | Single-mod startup verified in the dedicated server |
+
+The [versioned native initialization guide](https://github.com/ImJstNickDev/Innesto/blob/game/a1.2.10/docs/native-initialization.md)
+explains how to build the independent example and run it with an original
+fixture or a privately configured server.
 
 The [first release milestone](https://github.com/ImJstNickDev/Innesto/milestone/1)
-tracks native mod initialization, mod discovery and a cancellable block-break
-event. Installation instructions will accompany the first tested release.
+tracks mod discovery and the first cancellable block-break event. Installation instructions will accompany the first tested release.
 
 ## Contribute
 

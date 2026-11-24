@@ -11,12 +11,13 @@
 </p>
 
 Innesto is an independent mod loader and API project for Openworld. The loader
-will initialize mods inside the game process. The API will give authors a shared
-way to change game behavior and define how multiple mods interact.
+initializes native mods inside a dedicated server process. The API is under
+development on game-version branches.
 
-The first development target is **Openworld a1.2.10 on Linux x86-64**. Work is at
-the repository foundation stage. The first playable milestone is a separately
-built mod that can veto a block break through the public API.
+The first development target is **Openworld a1.2.10 on Linux x86-64**. On the version
+branch, a separately built mod has been verified to initialize once per server
+launch. The [native initialization guide](https://github.com/ImJstNickDev/Innesto/blob/game/a1.2.10/docs/native-initialization.md)
+covers the public entrypoint, example build and original test fixture.
 
 ## Work on the documentation
 
