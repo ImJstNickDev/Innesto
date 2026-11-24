@@ -17,6 +17,15 @@ set_target_properties(innesto-bootstrap PROPERTIES PREFIX "" C_VISIBILITY_PRESET
 target_compile_features(innesto-bootstrap PRIVATE c_std_11)
 target_link_libraries(innesto-bootstrap PRIVATE innesto-native-adapter ${CMAKE_DL_LIBS})
 
+option(INNESTO_SAVED_BLOCKS "Build the read-only saved block totals adapter" OFF)
+if(INNESTO_SAVED_BLOCKS)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(JANSSON REQUIRED IMPORTED_TARGET jansson>=2.11)
+    target_sources(innesto-bootstrap PRIVATE src/adapters/a1_2_10/saved_blocks.c)
+    target_link_libraries(innesto-bootstrap PRIVATE PkgConfig::JANSSON)
+    target_compile_definitions(innesto-bootstrap PRIVATE INNESTO_SAVED_BLOCKS=1)
+endif()
+
 # Keep the checked identity with the built bootstrap, including multi-config builds.
 add_custom_target(innesto-loader ALL
     COMMAND "${CMAKE_COMMAND}" "-Dlibrary=$<TARGET_FILE:innesto-bootstrap>"
@@ -29,6 +38,11 @@ if(BUILD_TESTING)
     find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
     add_subdirectory(tests/mappings)
     add_executable(innesto-test-host tests/host.c)
+    if(INNESTO_SAVED_BLOCKS)
+        add_test(NAME saved-blocks COMMAND "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/tests/saved_blocks.py" "$<TARGET_FILE_DIR:innesto-bootstrap>"
+            "${CMAKE_C_COMPILER}")
+    endif()
     # Plain, dedicated and integrated links share the same simulation objects.
     add_library(innesto-test-simulation OBJECT tests/block_break_host.c tests/block_break_rules.c)
     # Keep the rule call visible to the native linker even in an LTO build.
