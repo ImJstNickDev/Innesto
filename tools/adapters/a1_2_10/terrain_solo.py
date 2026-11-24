@@ -1,12 +1,15 @@
 """The a1.2.10 client's isolated, single-save Survival view on Linux."""
 from datetime import datetime, timezone
+from functools import cache
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import shutil
 import stat
+import subprocess
 import sys
 
 from innesto_packages import unique_keys
@@ -32,26 +35,63 @@ def _saves_roots(game_dir):
     # Older client startup code may consult the default profile before parsing
     # --game-dir. Hide its saves too when the user supplied another profile.
     roots = [game_dir / "saves"]
-    if default != game_dir and (default / "saves").is_dir():
+    if default != game_dir:
         roots.append(default / "saves")
     return roots
 
 
-def _within(path, parent):
-    """Include a second bind-mounted spelling of the same directory."""
-    if path.is_relative_to(parent):
-        return True
-    try:
-        info = parent.stat()
-    except FileNotFoundError:
-        return False
-    for part in (path, *path.parents):
+def _mount_containment():
+    """Compare paths on their underlying filesystems, including bind-mounted subtrees."""
+    def unescape(value):
+        return Path(os.fsdecode(re.sub(rb"\\([0-7]{3})", lambda m: bytes([int(m[1], 8)]), value)))
+
+    mounts = {}
+    for line in Path("/proc/self/mountinfo").read_bytes().splitlines():
+        number, _, device, root, point, _ = line.split(b" ", 5)
+        mounts[int(number)] = (device, unescape(root), unescape(point))
+
+    @cache
+    def position(path):
+        # A fresh destination may not exist. Open its nearest existing ancestor
+        # to ask the kernel which mount is actually visible, even for stacks.
+        ancestor = path
+        while True:
+            try:
+                fd = os.open(ancestor, os.O_PATH | os.O_CLOEXEC)
+                break
+            except FileNotFoundError:
+                if ancestor == ancestor.parent:
+                    raise
+                ancestor = ancestor.parent
         try:
-            if os.path.samestat(info, part.stat()):
-                return True
-        except FileNotFoundError:
-            continue
-    return False
+            with open(f"/proc/self/fdinfo/{fd}", "rb") as info:
+                mount_id = next(int(row.split()[1]) for row in info if row.startswith(b"mnt_id:"))
+        finally:
+            os.close(fd)
+        if mount_id not in mounts:
+            raise ValueError("mounts changed while checking the native Solo directories")
+        device, root, point = mounts[mount_id]
+        return device, root / path.relative_to(point)
+
+    @cache
+    def subtree_roots(parent):
+        # A path under a protected tree can live on a different filesystem,
+        # or on a bind mount rooted outside that tree. Include visible child
+        # mounts as additional roots without enumerating any saved world data.
+        roots = {position(parent)}
+        for device, root, point in mounts.values():
+            if point.is_relative_to(parent) and position(point.resolve()) == (device, root):
+                roots.add((device, root))
+        return roots
+
+    def within(path, parent):
+        if path.is_relative_to(parent):
+            return True
+        device, location = position(path)
+        return any(device == root_device and location.is_relative_to(root)
+                   for root_device, root in subtree_roots(parent))
+
+    return within
 
 
 def game_directory(world, arguments, *, inputs=()):
@@ -70,18 +110,21 @@ def game_directory(world, arguments, *, inputs=()):
     game_dir = Path(options.get("--game-dir", Path.home() / ".openworld/client")).resolve()
     world = Path(world).resolve()
     sources = [Path(p).resolve() for p in inputs if p is not None]
+    within = _mount_containment()
     for source in sources:
-        if _within(world, source) or _within(source, world):
+        if within(world, source) or within(source, world):
             raise ValueError("keep the managed Solo world separate from the installation, packages and cache")
     logs = Path(options["--log-dir"]).resolve() if "--log-dir" in options else None
     for saves in _saves_roots(game_dir):
         if saves.is_symlink() or (saves.exists() and not saves.is_dir()):
             raise ValueError("native Solo requires an unlinked client saves directory")
-        if _within(world, saves) or _within(saves, world):
+        if within(game_dir, saves):
+            raise ValueError("keep the native Solo profile outside ordinary client saves")
+        if within(world, saves) or within(saves, world):
             raise ValueError("keep the managed Solo world separate from the ordinary client saves")
-        if any(_within(p, saves) for p in sources):
+        if any(within(p, saves) for p in sources):
             raise ValueError("native Solo launcher inputs would be hidden by the saves view")
-        if logs and (_within(logs, saves) or _within(logs, world)):
+        if logs and (within(logs, saves) or within(logs, world)):
             raise ValueError("native Solo logs must be outside the world and client saves")
     return game_dir
 
@@ -150,26 +193,41 @@ def prepare_world(lease, world):
     os.fsync(lease)
 
 
-def exec_in_view(world, lease, game_dir, runtime, target_fd, executable, arguments, env):
-    """Enter the isolated client view and exec the previously verified image descriptor."""
+def _view_command(world, lease, game_dir, runtime, monitor_lease):
     bubblewrap = shutil.which("bwrap")
     if not bubblewrap:
         raise ValueError("native Solo requires bubblewrap with user and network namespaces")
     if not os.path.samestat(os.fstat(lease), os.stat(world)):
         raise ValueError("native Solo world directory changed while locked")
     view = Path(runtime) / "solo-save-view"
-    (view / SLOT).mkdir(mode=0o700, parents=True)
+    (view / SLOT).mkdir(mode=0o700, parents=True, exist_ok=True)
     cmd = [bubblewrap, "--unshare-user", "--unshare-pid", "--unshare-net",
-           "--dev-bind", "/", "/", "--proc", "/proc"]
-    # These are duplicates of the locked open-file description. Bubblewrap
-    # consumes its option fds. Keep the game's original lease descriptor open.
-    def lease_copy():
-        fd = os.dup(lease)
-        os.set_inheritable(fd, True)
-        return str(fd)
-    cmd += ["--sync-fd", lease_copy(), "--lock-file", str(Path(runtime) / LIFETIME)]
+           "--dev-bind", "/", "/", "--proc", "/proc",
+           "--sync-fd", str(monitor_lease), "--lock-file", str(Path(runtime) / LIFETIME)]
+    slots = []
     for saves in _saves_roots(game_dir):
-        cmd += ["--ro-bind", str(view), str(saves), "--bind-fd", lease_copy(), str(saves / SLOT)]
+        if saves != game_dir / "saves" and not saves.exists():
+            continue
+        slot = str(saves / SLOT)
+        cmd += ["--ro-bind", str(view), str(saves), "--bind", str(world), slot]
+        slots.append(slot)
+    return cmd, slots
+
+
+def check_view(world, lease, game_dir, runtime):
+    """Prove this save view can be mounted before enrolling a fresh world."""
+    cmd, _ = _view_command(world, lease, game_dir, runtime, lease)
+    test = subprocess.run([*cmd, "--", sys.executable, "-I", "-S", "-c", "pass"], pass_fds=(lease,),
+                          capture_output=True)
+    if test.returncode:
+        raise ValueError("cannot mount native Solo save view: " + test.stderr.decode(errors="replace").strip())
+
+
+def exec_in_view(world, lease, game_dir, runtime, target_fd, executable, arguments, env):
+    """Enter the isolated client view and exec the previously verified image descriptor."""
+    monitor_lease = os.dup(lease)
+    os.set_inheritable(monitor_lease, True)
+    cmd, slots = _view_command(world, lease, game_dir, runtime, monitor_lease)
     args = list(arguments)
     if "--game-dir" in args:
         args[args.index("--game-dir") + 1] = str(game_dir)
@@ -181,14 +239,18 @@ def exec_in_view(world, lease, game_dir, runtime, target_fd, executable, argumen
     child_env = env.copy()
     child_env["INNESTO_SOLO_PRELOAD"] = child_env.pop("LD_PRELOAD", "")
     trampoline = """import os, sys
+count = int(sys.argv[2])
+world = os.fstat(int(os.environ['INNESTO_WORLD_LEASE_FD']))
+if not all(os.path.samestat(world, os.stat(slot)) for slot in sys.argv[3:3+count]):
+    sys.exit("innesto-run: Solo save directory changed before launch")
 preload = os.environ.pop('INNESTO_SOLO_PRELOAD')
 if preload:
     os.environ['LD_PRELOAD'] = preload
 os.environ['INNESTO_INIT_PID'] = str(os.getpid())
 image = int(sys.argv[1])
 os.set_inheritable(image, False)
-os.execve(image, sys.argv[2:], os.environ)
+os.execve(image, sys.argv[3+count:], os.environ)
 """
     os.set_inheritable(target_fd, True)
-    cmd += ["--", sys.executable, "-I", "-S", "-c", trampoline, str(target_fd), executable, *args]
-    os.execve(bubblewrap, cmd, child_env)
+    cmd += ["--", sys.executable, "-I", "-S", "-c", trampoline, str(target_fd), str(len(slots)), *slots, executable, *args]
+    os.execve(cmd[0], cmd, child_env)

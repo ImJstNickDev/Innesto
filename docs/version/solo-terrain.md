@@ -4,7 +4,7 @@ Start Openworld through Innesto and select **Solo**. The client starts its bundl
 
 ## Prepare the client
 
-Use your activated Linux x86-64 a1.2.10 installation, a [private client profile](native-initialization.md#start-a-private-target), and [independently installed terrain packages](terrain-materials.md#install-both-examples). Managed Solo also requires Bubblewrap with user, PID and network namespace support and the `--bind-fd`, `--lock-file` and `--sync-fd` options. The session uses loopback. License activation and account management stay with the official launcher.
+Use your activated Linux x86-64 a1.2.10 installation, a [private client profile](native-initialization.md#start-a-private-target), and [independently installed terrain packages](terrain-materials.md#install-both-examples). Managed Solo also requires Bubblewrap with user, PID and network namespace support and the `--lock-file` and `--sync-fd` options. The session uses loopback. License activation and account management stay with the official launcher.
 
 Capture one stock session from the executable named by the client profile. Set `game_client` to its absolute path, enter a disposable vanilla Solo world with the stock pack, wait for terrain to render, then **Save & Leave** and quit. The console capture contains private session data. Keep it local.
 

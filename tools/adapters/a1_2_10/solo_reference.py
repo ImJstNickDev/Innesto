@@ -6,7 +6,7 @@ import re
 
 from innesto_elf import verify_target_image
 from . import terrain
-from .solo_host import _host_image
+from .solo_host import open_host_image
 
 
 def stock_count(log, host):
@@ -50,7 +50,7 @@ def reference(executable, expected, log):
         verify_target_image(source)
         if hashlib.file_digest(source, "sha256").hexdigest() != expected:
             raise ValueError("unsupported target fingerprint")
-    with _host_image(client) as source:
+    with open_host_image(client) as source:
         helper = hashlib.file_digest(source, "sha256").hexdigest()
     return {"soloHostSha256": helper, "terrainPackSha256": terrain.stock_fingerprint(terrain.original_pack(client)),
             "terrainBaseCount": stock_count(log, client.with_name("owserver"))}

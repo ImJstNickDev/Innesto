@@ -46,7 +46,8 @@ def copy_assets(source, destination, stock):
     shutil.copytree(source, destination, ignore=omit_pack, copy_function=shutil.copyfile)
 
 
-def run_supervised(action, *, process_group=False):
+def run_supervised(action, *, namespace_lifetime=None):
+    process_group = namespace_lifetime is not None
     # The parent owns the temporary installation and registry lease through the game's exit.
     signals = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT)
     mask = signal.pthread_sigmask(signal.SIG_BLOCK, signals)
@@ -84,6 +85,10 @@ def run_supervised(action, *, process_group=False):
             handlers[signum] = signal.signal(signum, forward)
         signal.pthread_sigmask(signal.SIG_SETMASK, mask)
         _, status = os.waitpid(pid, 0)
+        if namespace_lifetime is not None:
+            # The client can exit before its local host finishes saving. Keep
+            # forwarding signals and holding the installation through both exits.
+            fcntl.lockf(namespace_lifetime, fcntl.LOCK_EX)
     finally:
         for signum, handler in handlers.items():
             signal.signal(signum, handler)
@@ -126,7 +131,7 @@ def start(target, executable, digest, environment, mods, profile, arguments, lau
             with directory_lock(world) as lease:
                 Registry(lease, identity).bind({}, remaps, migrate=offline)
         raise ValueError("terrain packages missing for this world; restore the recorded packages or use "
-                         "--preview-terrain with the pinned terrain server profile and replacement packages")
+                         "--preview-terrain with the pinned target profile and replacement packages")
     if not materials:
         if solo:
             raise ValueError("--solo-world requires shared terrain packages")
@@ -231,7 +236,8 @@ def start(target, executable, digest, environment, mods, profile, arguments, lau
                 check_world_path(world, lease)
                 plan = registry.plan(candidates, bindings=bindings)
                 if solo:
-                    with solo_host.stage_solo_host(runtime, Path(executable), host_digest, world, lease):
+                    with solo_host.stage_solo_host(runtime, Path(executable), host_digest, world, lease) as lifetime:
+                        terrain_solo.check_view(world, lease, game_dir, runtime)
                         registry.commit(plan)
                         terrain_solo.prepare_world(lease, world)
 
@@ -239,7 +245,7 @@ def start(target, executable, digest, environment, mods, profile, arguments, lau
                             terrain_solo.exec_in_view(world, lease, game_dir, runtime, fd, argv[0], argv[1:], env)
 
                         return run_supervised(lambda: launch(staged, str(image), arguments, lease, exec_target=exec_solo),
-                                              process_group=True)
+                                              namespace_lifetime=lifetime)
                 registry.commit(plan)
                 arguments = routing.bind_world(arguments, world)
 

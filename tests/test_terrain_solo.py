@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from adapters.a1_2_10 import terrain_solo as solo
@@ -107,6 +108,61 @@ class SoloTest(unittest.TestCase):
         for path in (self.root, self.world, self.world / "bootstrap.so"):
             with self.subTest(launcher_input=path), self.assertRaises(ValueError):
                 solo.game_directory(self.world, self.args, inputs=[path])
+
+    def test_new_default_profile_never_exposes_managed_worlds_or_backups(self):
+        with patch.dict(os.environ, {"HOME": str(self.root / "operator")}):
+            public_saves = Path.home() / ".openworld/client/saves"
+            self.assertFalse(public_saves.exists())
+            for slot in ("Birch", "backup"):
+                with self.assertRaisesRegex(ValueError, "ordinary client saves"):
+                    solo.game_directory(public_saves / slot, self.args)
+            with self.assertRaises(ValueError):
+                solo.game_directory(self.world, self.args, inputs=[public_saves / "backup"])
+            with self.assertRaisesRegex(ValueError, "profile.*ordinary client saves"):
+                solo.game_directory(self.world, ["--game-dir", str(public_saves / "nested-profile")])
+            self.assertFalse(public_saves.exists())
+
+    @unittest.skipUnless(shutil.which("bwrap"), "requires bubblewrap")
+    def test_bind_mounts_of_save_descendants_and_nested_mounts(self):
+        check = subprocess.run(["bwrap", "--unshare-user", "--ro-bind", "/", "/", "true"], capture_output=True)
+        if check.returncode:
+            self.skipTest("kernel does not permit the Solo mount namespace")
+        home = self.root / "operator"
+        public = home / ".openworld/client/saves"
+        buried = public / "Birch slot" / "branch"
+        separate = self.root / "separate"
+        nested = public / "storage"
+        alias = self.root / "second spelling"
+        separate_alias = self.root / "separate alias"
+        for path in (buried, separate / "deep", nested, alias, separate_alias):
+            path.mkdir(parents=True)
+        script = """
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from adapters.a1_2_10.terrain_solo import game_directory
+world, profile, *aliases = map(Path, sys.argv[2:])
+args = ["--game-dir", str(profile)]
+assert game_directory(world, args) == profile
+for alias in aliases:
+    for chosen, options, inputs in (
+        (alias / "new-world", args, ()),
+        (world, args, (alias / "backup",)),
+        (world, ["--game-dir", str(alias / "profile")], ()),
+        (world, args + ["--log-dir", str(alias / "logs")], ()),
+    ):
+        try: game_directory(chosen, options, inputs=inputs)
+        except ValueError: pass
+        else: raise AssertionError((chosen, options, inputs))
+"""
+        tools = Path(__file__).resolve().parents[1] / "tools"
+        command = ["bwrap", "--unshare-user", "--ro-bind", "/", "/", "--setenv", "HOME", str(home),
+                   "--ro-bind", str(buried), str(alias), "--ro-bind", str(separate), str(nested),
+                   "--ro-bind", str(separate / "deep"), str(separate_alias),
+                   "--", sys.executable, "-B", "-c", script, str(tools), str(self.world), str(self.game),
+                   str(alias), str(separate_alias)]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     @unittest.skipUnless(shutil.which("bwrap"), "requires bubblewrap")
     def test_isolated_client_can_write_only_its_selected_save(self):

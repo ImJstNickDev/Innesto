@@ -177,6 +177,24 @@ int main(int argc, char **argv) {
         self.assertEqual(lock.read_bytes(), saved)
         self.assertEqual(stock_fingerprint(self.stock), stock_fingerprint(self.pack))
 
+    def test_unavailable_solo_namespace_does_not_enroll_a_fresh_world(self):
+        self.settings.update(environment="client", soloHostSha256=self.settings["sha256"])
+        shutil.copy2(self.host, self.host.with_name("owserver"))
+        cmd = self.command()[:-1] + ["--solo-world", self.world]
+        isolated_bin = self.instance / "bin"
+        isolated_bin.mkdir()
+        (isolated_bin / "python3").symlink_to(sys.executable)
+        env = {**os.environ, "PATH": str(isolated_bin), "HOME": str(self.instance),
+               "XDG_CACHE_HOME": str(self.instance / "cache")}
+        for stage in ("missing", "disabled"):
+            if stage == "disabled":
+                (isolated_bin / "bwrap").symlink_to(shutil.which("false"))
+            with self.subTest(stage=stage):
+                result = subprocess.run(cmd, env=env, text=True, capture_output=True)
+                self.assert_refused(result)
+                self.assertRegex(result.stderr, "bubblewrap|cannot mount")
+                self.assertEqual(list(self.world.iterdir()), [])
+
     def test_solo_rejects_the_wrong_host_role_and_unmanaged_saves(self):
         self.settings.update(environment="client", soloHostSha256=self.settings["sha256"])
         shutil.copy2(self.host, self.host.with_name("owserver"))

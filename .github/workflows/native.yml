@@ -24,6 +24,13 @@ jobs:
           -DCMAKE_C_FLAGS="-Wall -Wextra -Werror -pedantic"
       - name: Build
         run: cmake --build build/native --parallel
+      - name: Check the native Solo test environment
+        run: |
+          if ! command -v bwrap >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends bubblewrap
+          fi
+          bwrap --unshare-user --unshare-pid --unshare-net --ro-bind / / -- true
       - name: Exercise the example and target checks
         run: ctest --test-dir build/native --output-on-failure
 

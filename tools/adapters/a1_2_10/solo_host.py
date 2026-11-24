@@ -13,7 +13,7 @@ LIFETIME = "solo-lifetime"
 
 
 @contextmanager
-def _host_image(client_image):
+def open_host_image(client_image):
     # Pin the installed sibling itself. A FIFO must not block validation.
     path = client_image.resolve(strict=True).with_name("owserver")
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -28,7 +28,7 @@ def _host_image(client_image):
 def verify_host(client_image, expected_sha256):
     if not isinstance(expected_sha256, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", expected_sha256):
         raise ValueError("Solo requires a trusted soloHostSha256 in the private client profile")
-    with _host_image(client_image) as source:
+    with open_host_image(client_image) as source:
         actual = hashlib.file_digest(source, "sha256").hexdigest()
     if actual != expected_sha256.lower():
         raise ValueError("unsupported Solo host fingerprint")
@@ -40,7 +40,7 @@ def stage_solo_host(runtime, client_image, host_digest, world, lease):
     # The game locates its host next to its own executable and both resolve
     # the catalogue from the same sibling assets tree.
     destination = runtime / "owserver"
-    with _host_image(client_image) as source, destination.open("xb+") as staged:
+    with open_host_image(client_image) as source, destination.open("xb+") as staged:
         shutil.copyfileobj(source, staged)
         staged.seek(0)
         if hashlib.file_digest(staged, "sha256").hexdigest() != host_digest:
@@ -53,6 +53,6 @@ def stage_solo_host(runtime, client_image, host_digest, world, lease):
     # is still saving. Keep the staged installation until the reaper exits.
     with (runtime / LIFETIME).open("xb+") as lifetime:
         try:
-            yield
+            yield lifetime
         finally:
             fcntl.lockf(lifetime, fcntl.LOCK_EX)
