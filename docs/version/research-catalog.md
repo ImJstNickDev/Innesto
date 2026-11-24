@@ -1,0 +1,89 @@
+# Research catalogue for a1.2.10
+
+The private research catalogue answers three questions for an exact game build. Which interface was observed? Which evidence supports that interpretation? What still stops an adapter from using it? The launcher and mod API have no dependency on the catalogue.
+
+## Find a result or a missing prerequisite
+
+Run the commands below from the checkout. The evidence root is the directory against which the private snapshot's relative paths were recorded. SQLite and Python 3.11 or later are sufficient to query the catalogue.
+
+```sh
+tool=tools/research/catalog.py
+db=.private/atlas/catalog.sqlite
+python3 "$tool" history "$db"
+python3 "$tool" search "$db" --subsystem inventory
+python3 "$tool" search "$db" --kind function --role dedicated
+python3 "$tool" needs "$db" --issue 3
+python3 "$tool" files "$db" verification --limit 20
+```
+
+Use `show DB KEY` to see the exact claim, its limits, native candidate, signature status, type notes, supporting files and related records. A semantic name can occur in several images or in more than one candidate. The client, dedicated server and bundled Solo host have separate roles, even when two installed binaries contain identical bytes. A match between identical copies establishes shared code identity. It does not independently establish what that code does in either role.
+
+## Record and reproduce an observation
+
+Keep projects, logs, binaries, private inputs and the SQLite file outside public Git history. The portable snapshot is JSON. Each revision includes the game and platform, a digest per studied role, a manifest of SHA-256 evidence receipts, records, relationships and issue prerequisites. Private machine addresses belong only to function records. Each signature has its own state. The catalogue can record an unknown signature even when the surrounding behavior is well established.
+
+```sh
+python3 "$tool" import "$db" "$snapshot" --root .private
+python3 "$tool" verify "$db" --root .private
+python3 "$tool" snapshot "$db" --revision 1 > "$private_replay_file"
+```
+
+Import checks each evidence file and commits a complete revision atomically. Reimporting an identical revision is safe. Correcting a claim requires the next revision. Archive manifests index historical paths and hashes without moving or copying the original files. `verify --archived` also rehashes every indexed historical regular file. Keep the evidence tree with the database when moving it. A database backup preserves the observations and receipts; the original files are required to reproduce them.
+
+| State | Meaning |
+| --- | --- |
+| Discovered | An artifact, function candidate or observable surface exists in this build. |
+| Inferred | The evidence supports an interpretation. The record identifies what could disprove it. |
+| Verified | Independent evidence supports the precise claim on the specified role. Scope and remaining unknowns still apply. |
+
+Record confidence separately from state. A high-confidence candidate can still have an unknown calling convention. Track the issue's missing prerequisite even when a related observable behavior is verified. A save containing a crafted item, for example, establishes persistence. Determining which side validated the ingredient debit takes separate evidence.
+
+## From a finding to a binding
+
+1. Identify a semantic operation in a subsystem. Keep the measured behavior, the candidate function and any cross-image correspondence in separate records linked by explicit relationships.
+2. Confirm the operation on each supported role using independent evidence. For a callable interface, establish the native signature, operand type, lifetime, execution context and failure behavior. Similarity scores and inferred prototypes do not satisfy this requirement.
+3. Review each distributable identifier and typed mapping against the exact snapshot. Record the reviewer and the distribution basis for each selection in a separate private review document. A semantic-only grant can publish an Innesto identifier. A binding grant also requires a verified declaration of a supported cooperative slot.
+4. Export the reviewed fields, inspect the diff and submit the original declaration and its tests through a PR. Pair the result privately with the reviewed image before use. The native adapter checks the exact profile, expected kind and operand before a hook or typed projection can be installed. Advertise the high-level capability only after the binding succeeds and the actual game meets its acceptance criteria. [Native mapping adapter](native-mappings.md)
+
+```sh
+python3 "$tool" export "$db" "$private_review" --root .private > "$candidate_export"
+```
+
+Exports use the checksummed snapshot document and a field allowlist. A stale review, changed evidence, unverified record, ambiguous identifier or slot, or missing typed declaration stops the export. The result contains reviewed semantic IDs, roles and any approved cooperative slot kinds and numbers. Keep binary fingerprints, locations, private signatures, type notes, evidence and review records in the private workspace. A successful export is a review candidate; distribution requires an individual licensing and provenance decision.
+
+## Methodology
+
+AnyPS5 separates observations of a caller from measurements of the implementation and records which questions the evidence can settle. LeviLamina separates symbol and hook facilities from typed event emission. Fabric API's block-break contract distinguishes the logical server, cancellation and post-action notification. Innesto uses these distinctions to keep evidence, adaptation and mod-facing behavior independently testable. [AnyPS5 research methodology](https://github.com/boykopovar/AnyPS5/blob/5f04682cef1e1c7f46162773b6a92a6fa49dd59a/docs/dev/REVERSE_ENGINEERING.md) · [LeviLamina event implementation](https://github.com/LiteLDev/LeviLamina/blob/922ff2e83cd3bccae56970d325cc3669344d8117/src/ll/api/event/player/PlayerDestroyBlockEvent.cpp) · [Fabric API event contract](https://github.com/FabricMC/fabric-api/blob/495da79f62942fa2630b576ce2075536d37b8223/fabric-events-interaction-v0/src/main/java/net/fabricmc/fabric/api/event/player/PlayerBlockBreakEvents.java)
+
+## Run the original analysis fixtures
+
+The scoped inventory starts from an explicit ELF and an operator-selected set of data strings. It intersects candidate references with x86-64 unwind ranges. Headless Ghidra checks the selected bodies; PyGhidra can reopen the saved project and check the target identity and function entries. An interval can describe just part of a native function. A role remains attached to its installed image throughout the analysis.
+
+Use a fresh work directory for each command. With an installed Ghidra 12.2 distribution, a compatible JDK, GNU binutils, a C compiler and the distribution's PyGhidra package:
+
+```sh
+python3 tools/research/ghidra/fixture.py \
+  --work "$work/inventory" --headless "$GHIDRA_INSTALL_DIR/support/analyzeHeadless" --pyghidra
+python3 tools/research/matching/check_fixture.py \
+  --ghidra "$GHIDRA_INSTALL_DIR" --output "$work/matching"
+```
+
+The matching fixture compares selected functions in two independently compiled stripped binaries. BSim ranks the selected pairs; Version Tracking runs exact correlators over the same selection. The fixture separately executes known inputs against the original programs. Changing a constant can change program output while leaving the structural match intact. Inspect the alternative candidates and record any independent evidence before assigning a semantic ID. [Ghidra BSim tutorial](https://ghidra.re/ghidra_docs/GhidraClass/BSim/README.html)
+
+## Snapshot and review documents
+
+A format-1 snapshot contains `revision`, `game`, `platform`, `targets` (role to private image digest), `artifacts` (evidence path to digest), `records`, `links` and `needs`. Optional `archives` names pinned JSON-lines manifests. Each indexed regular file has `kind: "file"`, a relative path, size and SHA-256; the manifest retains symlink and exclusion notes separately.
+
+A record requires a unique `key`, a `semantic` ID, role, subsystem, kind, state, confidence, claim, limits and one or more evidence entries. Each evidence entry names a pinned path and its method. Two method labels alone do not establish independence. The maintainer must explain what the second observation actually tests. Use `entry` for a private ELF address and `signature_state` for the separate assessment of a native prototype. `types` holds type observations. A link connects two record keys. A prerequisite names an issue, a record key and what that issue still requires. [Executable catalogue examples](https://github.com/ImJstNickDev/Innesto/blob/game/a1.2.10/tests/test_research_catalog.py)
+
+A review document specifies `format: 1`, the integer `revision`, the exact `snapshot` digest printed by import, a `reviewer` and a list of `grants`. Each grant names one record `key`, a `mode` of `semantic` or `binding`, and its distribution `basis`. Review the evidence and entitlement for each proposed grant before signing off in the PR.
+
+To prepare a cooperative binding for a local adapter, verify that the installation, role and exported document all agree with the review. This output **is private** and contains the exact image digest.
+
+```sh
+umask 077
+python3 "$tool" private-profile "$db" "$private_review" --root .private \
+  --role dedicated --image "$local_executable" --mappings "$candidate_export" > "$private_profile"
+```
+
+The original native regression takes the reviewed rule and position slots through the existing C adapter, checks the image identity, binds the typed projection and exercises the decision. A changed executable, different role or edited public document fails before profile generation. The adapter's cooperative declaration is a property of that fixture. Distributed game research needs its own verified resolution and invocation evidence.

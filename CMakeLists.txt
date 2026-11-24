@@ -84,6 +84,7 @@ if(BUILD_TESTING)
     add_test(NAME environments COMMAND "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/tests/environments.py" "$<TARGET_FILE_DIR:innesto-bootstrap>"
         "${CMAKE_C_COMPILER}")
+    add_test(NAME research-catalog COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/test_research_catalog.py")
     add_test(NAME terrain-backup COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/test_terrain_backup.py")
     add_test(NAME terrain-registry COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/test_terrain_registry.py")
     add_test(NAME terrain-frames COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/test_terrain_frames.py")
