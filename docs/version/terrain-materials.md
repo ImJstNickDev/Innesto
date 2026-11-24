@@ -20,6 +20,16 @@ Put the original image at `assets/ochre.png` in the package. Version 1 takes non
 
 The registration contract is declarative and runs before native initialization. Mod authors use the namespaced ID in the package. For operator placement, use the material name shown by the running dedicated server's dashboard. Numeric material slots belong to the world and depend on its pinned base catalogue.
 
+## Can registered materials generate naturally?
+
+Innesto's a1.2.10 content contracts (versions 1–3) cover material identity, appearance and gameplay family. They expose no rule for abundance, deposit size, altitude, biome or planet. Selecting the plant family gives a placed material its vegetation behavior. It does not add that material to a biome's plant selection.
+
+Openworld uses a seed and terrain layout to generate new columns. Its inspector describes the surface materials and vegetation of each biome and reports the positions, sizes and materials of native deposits. The game also documents where players can find its native ores. [Openworld resource guide](https://www.play-openworld.com/en-gb/guides/exploration/how-to-find-resources-oil-ores/)
+
+In fresh dedicated worlds with the same seed, Copperfield and Reedbed added two catalogue entries. The biome descriptions and sampled deposit and tree instances matched the stock server on Earth and the Moon. The sampled voxel material IDs also matched, including native ores. Changing the seed changed the sampled terrain. In a separate Survival session with Copperfield, Reedbed and Aster installed, the dedicated server served fresh terrain to a connected client. Its live map showed the same surfaces and mesh as the stock world across 25 columns, including after restart.
+
+Innesto needs a verified dedicated-server interface that binds a world's persistent material ID to a generation rule or selects that material while creating a new column, before the column is saved. The inspector exposes its rules for reading. The celestial map controls planet properties. The authored estate tested in solo was a one-time build tied to one seed and layout. None provided a verified rule input for natural multiplayer generation. Natural harvesting and the behavior of existing worlds when adding generation rules remain unverified. [Track world generation in issue #47](https://github.com/ImJstNickDev/Innesto/issues/47).
+
 ## Choose terrain properties in version 2
 
 Set `content.version` to `2` to select a material family. You can also set the tile size reported in the server catalogue. These fields apply to each material. A package can contain several families.
