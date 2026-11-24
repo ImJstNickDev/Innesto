@@ -1,4 +1,4 @@
 # Native mod initialization
 
-See [Native mod initialization for Openworld a1.2.10](version/native-initialization.md)
-for build instructions, launch commands and verified behavior.
+The [a1.2.10 native initialization guide](https://imjstnickdev.github.io/Innesto/versions/a1.2.10/native-initialization/)
+covers the public entrypoint, build instructions and acceptance checks.

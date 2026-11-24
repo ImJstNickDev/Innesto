@@ -4,15 +4,15 @@ Innesto is an independent project for writing native mods for Openworld.
 Each supported game version has its own development branch for the loader and
 API.
 
-## Compatibility
+## Game versions
 
-| Openworld | Platform | Innesto status |
+| Openworld | Platform | Guide |
 | --- | --- | --- |
-| a1.2.10 | Linux x86-64 | [Single-mod initialization verified](version/index.md) |
+| a1.2.10 | Linux x86-64 | [Build, run and write mods](versions/a1.2.10/index.md) |
 
-The [first release milestone](https://github.com/ImJstNickDev/Innesto/milestone/1)
-tracks native mod initialization, mod discovery and a cancellable block-break
-event. Installation instructions will accompany the first tested release.
+Each guide describes the loader and API on its game branch. The
+[first release milestone](https://github.com/ImJstNickDev/Innesto/milestone/1)
+tracks progress toward the development prerelease.
 
 ## Contribute
 
