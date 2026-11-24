@@ -50,7 +50,7 @@ The follow-up catalogue tracks 60 unique game functions across the two images, u
 
 | Operation | Evidence from the installed dedicated server | Boundary for an adapter |
 | --- | --- | --- |
-| Count initialized material slots | A stock generator check returned 435. Adding 8,192 rows made the same operation return 8,627. Independent server catalogues agreed with both values. | Count includes stock, reserved and empty-material slots. First initialization and teardown have a separate lifecycle. |
+| Count initialized material slots | A standalone generator check returned 435 on the stock catalogue. Adding 8,192 rows made the same operation return 8,627 in a second standalone check. Independent server catalogues agreed with both values. | Count includes stock, reserved and empty-material slots. First initialization and teardown have a separate lifecycle. |
 | Resolve an exact material name | A valid zero-slot name and a missing name both returned zero. The accompanying success flag distinguished them. Changing the case of a known name produced a miss. A stock material’s lookup name and its dashboard key also gave different results. | A lookup API needs an explicit success result and a documented name space. The confirmed caller ran on the dedicated main thread with writable result storage. |
 | Normalize a saved item code | During player-save reads in two isolated dedicated processes, the same alternative code normalized to the canonical value in both hotbar and bag. The canonical input stayed unchanged. Static analysis accounted for the other return paths. | This converts a code. Stack quantity, ownership and crafting authorization belong to separate operations. |
 
@@ -71,8 +71,8 @@ on each run. The mod made zero native material calls.
 The installed executables provide no material accessor through their dynamic
 symbol tables. The operator's exact-name lookups ran on the server's main
 thread. Dashboard row reads ran on a secondary thread and exercised a
-different operation. A binding still needs a reviewed way to resolve both
-operations for the exact image and a way to execute while the registry is live,
+different operation. A binding still needs a reviewed way to resolve the slot
+count and exact-name lookup for the exact image and to call them while the registry is live,
 with a verified thread and shutdown contract. The physical client has its own
 image. Solo runs a separate host process and needs independent delivery there.
 
