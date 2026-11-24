@@ -58,6 +58,36 @@ Twelve isolated server boots tested when the active material roster is chosen. I
 
 On the client, the crafting grid consumes a stock recipe collection. Stock result counts agreed with an archived Survival craft. During two player crafting intervals, the dedicated server logged inventory saves. The component responsible for approving the ingredient debit remains unknown. The existing recipe-registration and authority gates below still apply.
 
+### Can a mod query the live material registry?
+
+On the dedicated server, an independently compiled API 2 mod paused at its
+initializer and again at its startup-complete callback. Both ran on the
+process leader with logical side unknown. A separate observer found the native
+registry uninitialized at all eight checkpoints across four launches. Once
+the server was serving its world, the observed slot counts were 435 in both
+stock runs and 8,627 in both extended runs. The game's own catalogue agreed
+on each run. The mod made zero native material calls.
+
+The installed executables provide no material accessor through their dynamic
+symbol tables. The operator's exact-name lookups ran on the server's main
+thread. Dashboard row reads ran on a secondary thread and exercised a
+different operation. A binding still needs a reviewed way to resolve both
+operations for the exact image and a way to execute while the registry is live,
+with a verified thread and shutdown contract. The physical client has its own
+image. Solo runs a separate host process and needs independent delivery there.
+
+A future lookup contract must return success separately from the numeric slot.
+AIR succeeds at slot zero and a miss also returns zero. The input is the
+native lookup name. A pack key can differ from that name, and an Innesto
+identifier belongs to the persistent world registry. [Material API acceptance](https://github.com/ImJstNickDev/Innesto/issues/55)
+
+The bounded crafting follow-up identified two further client functions,
+bringing the inventory to 62 unique functions and 43 semantic names. On the
+checked stock paths the client owns the recipe rows and their ingredient
+storage. Growing the collection can invalidate a row address. The two new
+functions have static evidence and unknown calling contracts. Identifying
+which side approves an ingredient debit still requires transaction evidence.
+
 | Issue | Evidence still required |
 | --- | --- |
 | [#3](https://github.com/ImJstNickDev/Innesto/issues/3) | A mod controls the authoritative pre-break decision, with ordered listeners, correct drops, feedback and reconnect behavior. |
