@@ -92,4 +92,4 @@ example marker once, in the verified server process. Both initialized fresh
 worlds and shut down normally. A control launch emitted no marker. Changing
 the expected fingerprint caused the launcher to reject the target before
 starting the server. The [acceptance record](https://github.com/ImJstNickDev/Innesto/issues/1)
-tracks the tested revision and results.
+tracks the tested revision and results. The [offline client bootstrap check](environments.md#offline-client-bootstrap) records startup and removal of the independent API 2 examples on the distributed client.

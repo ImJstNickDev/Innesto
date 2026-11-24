@@ -2,7 +2,7 @@
 
 The physical environment identifies the executable selected by a private
 target profile. A dedicated server profile uses `"environment": "server"`.
-A client fixture profile uses `"environment": "client"`. Profiles written
+A client profile uses `"environment": "client"`. Profiles written
 before this field existed default to `server`. The profile owner identifies
 the process and pins its fingerprint. A mod declares which processes can
 load its library in its manifest.
@@ -58,8 +58,27 @@ For each launch, `shared-hello` initializes first, then `client-hello` or
 `server-hello`. Each writes a second marker during startup completion.
 All four markers have the host's PID and `logical=unknown`. Removing the
 environment-specific package leaves both markers from `shared-hello`.
-The client test exercises an original executable. Real-game acceptance
-for this branch covers the dedicated server.
+The commands above exercise the original test host on both profiles.
+
+## Offline client bootstrap
+
+The three `examples/environments` packages were built separately from the
+loader and tested with the distributed a1.2.10 Linux x86-64 client. The
+local run used a verified, read-only installation, an isolated display
+and a network namespace with only loopback. Each hello mod queried
+Innesto's capability tables and reported its own lifecycle. The test
+ended at the main menu.
+
+| Launch | Observed inside the client PID |
+| --- | --- |
+| Ordinary startup | The client displayed its menu with zero hello markers. |
+| All three packages installed | `shared-hello` initialized before `client-hello`. Startup-complete ran in the same order. Both libraries were mapped in the client process. `server-hello` was skipped. |
+| Packages removed, loader retained | The client displayed its menu again with zero hello libraries and zero markers. |
+
+All four callbacks in the middle run reported physical `client` and
+logical `unknown` before the menu appeared. Each run shut down cleanly
+from the menu. Gameplay callbacks and an integrated world each require
+their own acceptance test. [Client acceptance record](https://github.com/ImJstNickDev/Innesto/issues/28).
 
 ## Get the mod context
 

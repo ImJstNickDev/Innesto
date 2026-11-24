@@ -14,11 +14,8 @@ in dependency order before the host enters `main`.
 | Target | Observed behavior |
 | --- | --- |
 | Openworld dedicated server | API 1 and API 2 examples initialized together. A saved world reopened after package removal and reinstallation. See the [server restart check](mod-packages.md#check-a-dedicated-server-restart). |
-| Original Openworld client | The unmodified client reached the menu in an isolated offline run. Client mod initialization has been exercised on the original Innesto fixtures. |
+| Openworld client | The shared and client hello packages initialized and completed startup before the menu. The dedicated-server package was skipped. The client reopened the menu after removal. [Offline client check](environments.md#offline-client-bootstrap) |
 | Innesto's stripped simulation fixtures | The [before-block-break capability](before-block-break.md) dispatches on the logical server in both dedicated and integrated configurations. A veto preserves the modeled block and suppresses its drop. |
-
-Innesto's client mod tests use original fixtures. The game's terms restrict
-use of a modified client. [Openworld terms of use, section 6](https://www.play-openworld.com/legal/en/conditions).
 
 [Issue #3](https://github.com/ImJstNickDev/Innesto/issues/3) tracks the
 decision and player-visible veto in the distributed game. It gates the
