@@ -155,7 +155,11 @@ for alias in aliases:
         except ValueError: pass
         else: raise AssertionError((chosen, options, inputs))
 """
-        tools = Path(__file__).resolve().parents[1] / "tools"
+        # The namespace drops capabilities. Its imports must be reachable
+        # without traversing a runner account's private home directory.
+        tools = self.root / "tools"
+        shutil.copytree(Path(__file__).resolve().parents[1] / "tools", tools,
+                        ignore=shutil.ignore_patterns("docs", "__pycache__"))
         command = ["bwrap", "--unshare-user", "--ro-bind", "/", "/", "--setenv", "HOME", str(home),
                    "--ro-bind", str(buried), str(alias), "--ro-bind", str(separate), str(nested),
                    "--ro-bind", str(separate / "deep"), str(separate_alias),
