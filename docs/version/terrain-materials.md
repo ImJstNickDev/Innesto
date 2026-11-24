@@ -22,7 +22,7 @@ The registration contract is declarative and runs before native initialization. 
 
 ## Choose terrain properties in version 2
 
-Set `content.version` to `2` to select a family and the number of metres covered by one texture tile. These fields apply to each material. A package can contain several families.
+Set `content.version` to `2` to select a material family. You can also set the tile size reported in the server catalogue. These fields apply to each material. A package can contain several families.
 
 ```json
 "content": {
@@ -45,7 +45,7 @@ Set `content.version` to `2` to select a family and the number of metres covered
 
 The server applies these properties to placed voxels. It counted an elevated rock pad as the terrain surface, looked through an equally sized plant pad to the stone below and reported liquid depth for a liquid pad. Suspended rock stayed in place. Plant voxels placed above open air disappeared and could be placed again in the same cells. The contract provides the game's family behavior. Growth rules, flow, drop tables and new recipes have no registration fields in this version.
 
-`tileMeters` accepts `0.25`, `0.5`, `1`, `1.5`, `2` or `2.5`. It defaults to `1`. Smaller values repeat the texture over a shorter distance. Every version 1 material retains its original one-metre rock definition. Writing those same defaults in version 2 preserves the material's compatibility with its existing world.
+`tileMeters` accepts `0.25`, `0.5`, `1`, `1.5`, `2` or `2.5`. The default is `1`. The dedicated server reported each selected value. In a connected client, identical checker patterns at `0.5` and `2` repeated at the same spacing. Treat this field as catalogue metadata. Version 1 materials keep their original rock definition and value of `1`. Writing those same defaults in version 2 preserves the material's compatibility with its existing world.
 
 ### Name a material in the player's language
 
@@ -112,7 +112,7 @@ Start a client with a legitimate local game directory and its normal licensed se
 
 Choose **Multiplayer → Direct connect** in the visible window and enter the same address, `127.0.0.1:24710`. Openworld’s own `--play HOST:PORT` starts a hidden direct client for automated sessions. Innesto also checks the peer supplied by that flag.
 
-Before starting the client, Innesto reads the chosen server's dashboard catalogue and compares material names, absolute slots and served texture receipts. For each material, the receipt covers the base texture, family, scale, translations and ordered frame contents. Changing any of them requires matching packages on both sides and a new world. The default dashboard TCP port is the game port plus one. Set `terrainDashboardPort` in the client profile for a different dashboard port. The client must be able to read that dashboard. These examples use loopback. The preflight applies to the selected address. Opening the menu does not restrict the game’s other server choices. Restart Innesto to check a different server.
+Before starting the client, Innesto reads the chosen server's dashboard catalogue and compares material names, absolute slots and served texture receipts. For each material, the receipt covers the base texture, family, catalogue tile size, translations and ordered frame contents. Changing any of them requires matching packages on both sides and a new world. The default dashboard TCP port is the game port plus one. Set `terrainDashboardPort` in the client profile for a different dashboard port. The client must be able to read that dashboard. These examples use loopback. The preflight applies to the selected address. Opening the menu does not restrict the game’s other server choices. Restart Innesto to check a different server.
 
 ## Reopen and back up a world
 
