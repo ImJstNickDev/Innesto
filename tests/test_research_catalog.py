@@ -58,8 +58,30 @@ class Catalogue(unittest.TestCase):
         self.ingest()
         self.assertEqual(json.loads(self.run_cli("files", self.db, "LEG"))[0]["path"], "legacy")
         self.run_cli("verify", self.db, "--root", self.root, "--archived")
+        with sqlite3.connect(self.db) as db:
+            db.execute("DELETE FROM archive_files")
+        self.run_cli("verify", self.db, "--root", self.root, "--archived", ok=False)
+        self.snapshot["revision"] = 2
+        self.ingest()
         content.write_bytes(b"new")
         self.run_cli("verify", self.db, "--root", self.root, "--archived", ok=False)
+
+    def test_binding_kind_requires_its_cooperative_signature(self):
+        self.record["signature"] = "void(void)"
+        self.ingest(False)
+
+    def test_null_role_and_null_relationship_keys_are_rejected(self):
+        self.record["role"] = None
+        self.ingest(False)
+        self.record["role"] = "dedicated"
+        for field in ("source", "target"):
+            link = {"source": "owned.rule", "target": "owned.rule", "relation": "requires"}
+            link[field] = None
+            self.snapshot["links"] = [link]
+            self.ingest(False)
+        self.snapshot["links"] = []
+        self.snapshot["needs"][0]["key"] = None
+        self.ingest(False)
 
     def test_history_search_and_dependencies(self):
         digest = self.ingest()
@@ -131,6 +153,11 @@ class Catalogue(unittest.TestCase):
         self.assertIn("reviewed 4 5 6", result.stdout)
         self.assertIn("block present=1", result.stdout)
         self.run_cli(*command, "--role", "solo", ok=False)
+        altered = json.loads(public.read_text())
+        altered["format"] = True
+        altered["mappings"][0]["binding"]["slot"] = float(altered["mappings"][0]["binding"]["slot"])
+        public.write_text(json.dumps(altered))
+        self.run_cli(*command, "--role", "dedicated", ok=False)
         public.write_text("{}")
         self.run_cli(*command, "--role", "dedicated", ok=False)
         public.write_text(self.run_cli("export", self.db, review, "--root", self.root))

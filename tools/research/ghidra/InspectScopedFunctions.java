@@ -30,10 +30,13 @@ public class InspectScopedFunctions extends GhidraScript {
         boolean sitesOnly = candidate.has("sites_only") && candidate.get("sites_only").getAsBoolean();
         Function function = null;
         if (!sitesOnly) {
+            function = getFunctionAt(entry);
+            if (function != null && !scope.contains(function.getBody())) {
+                throw new IllegalArgumentException("Saved function body exceeds the selected unwind extent");
+            }
             if (!new DisassembleCommand(entry, scope, true).applyTo(currentProgram, monitor)) {
                 throw new IllegalStateException("Disassembly failed at " + entry);
             }
-            function = getFunctionAt(entry);
             if (function == null) {
                 function = currentProgram.getFunctionManager().createFunction(null, entry, scope, SourceType.ANALYSIS);
             }

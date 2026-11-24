@@ -1,5 +1,6 @@
 """Verify scoped extraction on an original ELF. Outputs stay in the supplied work directory."""
 import argparse
+import copy
 import json
 import os
 from pathlib import Path
@@ -71,10 +72,37 @@ def run():
     assert verified["entry"] == function["entry"]
     assert verified["confirmed_references"] == function["references"]
     assert verified["decompiled"] and verified["basic_blocks"] >= 1 and verified["instructions"] >= 2
+    narrower = copy.deepcopy(plan)
+    narrower["functions"][0]["end"] = hex(entry + 1)
+    narrower["functions"][0]["references"] = []
+    plan_file.write_text(json.dumps(narrower))
+    too_wide = work / "too-wide.json"
+    rejected = subprocess.run([*base, "-process", binary.name, "-readOnly", *script, too_wide],
+                              capture_output=True, text=True, check=False)
+    if too_wide.exists() or "Saved function body exceeds" not in (rejected.stdout + rejected.stderr):
+        raise RuntimeError("unexpected extent result: " + (rejected.stdout + rejected.stderr)[-4000:])
+    plan_file.write_text(json.dumps(plan))
     if args.pyghidra:
         from verify_project import verify
         verified_project = verify(headless.parents[1], project, "Fixture", binary.name, plan, summary)
         assert verified_project["verified_references"] == len(function["references"])
+        swapped = copy.deepcopy(plan)
+        first, second = swapped["functions"][0]["references"]
+        first["instruction"], second["instruction"] = second["instruction"], first["instruction"]
+        forged = copy.deepcopy(summary)
+        forged["functions"][0]["confirmed_references"] = swapped["functions"][0]["references"]
+        try:
+            verify(headless.parents[1], project, "Fixture", binary.name, swapped, forged)
+        except ValueError as error:
+            assert str(error) == "saved LEA targets a different literal address"
+        else:
+            raise AssertionError("swapped literal destinations passed verification")
+        try:
+            verify(headless.parents[1], project, "Fixture", binary.name, narrower, summary)
+        except ValueError as error:
+            assert str(error) == "saved function missing or outside selected unwind extent"
+        else:
+            raise AssertionError("oversize preexisting function passed verification")
     print("Ghidra fixture passed")
 
 

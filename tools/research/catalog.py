@@ -13,8 +13,9 @@ import sys
 FORMAT = 1
 APPLICATION = 0x494E5253
 ROLES = {"client", "dedicated", "solo"}
-SUBSYSTEMS = {"registries", "crafting", "inventory", "persistence", "voxels", "simulation", "generation"}
+SUBSYSTEMS = {"registries", "crafting", "inventory", "persistence", "voxels", "simulation", "generation", "creative"}
 KINDS = {"function", "type", "behavior", "data-contract", "prerequisite", "match"}
+COOPERATIVE_SIGNATURES = {"rule": "int(opaque const*)", "position": "position(opaque const*)"}
 STATES = {"discovered", "inferred", "verified"}
 METHODS = {"static", "runtime", "differential", "source", "comparison", "artifact", "documentation"}
 ID = re.compile(r"[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*\Z")
@@ -89,18 +90,23 @@ def relative_name(name):
             and ".." not in Path(name).parts)
 
 
+def verify_file(root, name, digest, size=None):
+    require(relative_name(name), "evidence needs a canonical relative path")
+    require(isinstance(digest, str) and HASH.fullmatch(digest), "invalid evidence digest")
+    path = (root / name).resolve(strict=True)
+    require(path.is_relative_to(root) and path.is_file(), "evidence is outside the root or not a regular file")
+    with path.open("rb") as stream:
+        require(size is None or os.fstat(stream.fileno()).st_size == size, f"changed evidence size: {name}")
+        require(hashlib.file_digest(stream, "sha256").hexdigest() == digest, f"changed evidence: {name}")
+
+
 def verify_files(root, artifacts):
     root = root.resolve(strict=True)
     for name, digest in artifacts:
-        require(relative_name(name), "evidence needs a canonical relative path")
-        require(isinstance(digest, str) and HASH.fullmatch(digest), "invalid evidence digest")
-        path = (root / name).resolve(strict=True)
-        require(path.is_relative_to(root) and path.is_file(), "evidence is outside the root or not a regular file")
-        with path.open("rb") as stream:
-            require(hashlib.file_digest(stream, "sha256").hexdigest() == digest, f"changed evidence: {name}")
+        verify_file(root, name, digest)
 
 
-def index_archive(db, rev, root, manifest, expected):
+def archive_entries(root, manifest, expected):
     digest = hashlib.sha256()
     with (root / manifest).open("rb") as stream:
         for raw in stream:
@@ -112,14 +118,28 @@ def index_archive(db, rev, root, manifest, expected):
             fields(entry, ("kind", "path", "size", "sha256"))
             require(entry["kind"] == "file" and type(entry["size"]) is int and entry["size"] >= 0
                     and isinstance(entry["sha256"], str) and HASH.fullmatch(entry["sha256"]), "invalid archive file")
-            db.execute("INSERT INTO archive_files VALUES(?,?,?,?,?)",
-                       (rev, manifest, entry["path"], entry["size"], entry["sha256"]))
+            yield entry["path"], entry["size"], entry["sha256"]
     require(digest.hexdigest() == expected, "archive manifest changed during import")
 
 
-def insert_record(db, rev, r, artifacts):
+def verify_archives(db, rev, root, snapshot):
+    root = root.resolve(strict=True)
+    count = 0
+    for manifest in snapshot.get("archives", []):
+        for path, size, digest in archive_entries(root, manifest, snapshot["artifacts"][manifest]):
+            row = db.execute("SELECT manifest,size,digest FROM archive_files WHERE revision=? AND path=?",
+                             (rev, path)).fetchone()
+            require(row and tuple(row) == (manifest, size, digest), "archive index differs from manifest")
+            verify_file(root, path, digest, size)
+            count += 1
+    require(count == db.execute("SELECT count(*) FROM archive_files WHERE revision=?", (rev,)).fetchone()[0],
+            "unexpected archive index entries")
+
+
+def insert_record(db, rev, r, artifacts, targets):
     fields(r, ("key", "semantic", "role", "subsystem", "kind", "state", "confidence", "claim", "limits", "evidence"),
            ("entry", "signature", "signature_state", "types", "binding"))
+    choice(r["role"], targets, "record role for this snapshot")
     check_id(r["key"])
     check_id(r["semantic"])
     choice(r["subsystem"], SUBSYSTEMS, "subsystem")
@@ -151,7 +171,8 @@ def insert_record(db, rev, r, artifacts):
     binding = r.get("binding")
     if binding is not None:
         fields(binding, ("kind", "slot"))
-        choice(binding["kind"], {"rule", "position"}, "cooperative binding kind")
+        choice(binding["kind"], COOPERATIVE_SIGNATURES, "cooperative binding kind")
+        require(prototype == COOPERATIVE_SIGNATURES[binding["kind"]], "signature differs from cooperative declaration")
         require(r["kind"] == "function" and r["state"] == status == "verified", "binding must have a verified ABI")
         require(type(binding["slot"]) is int and 0 <= binding["slot"] < 2**32, "invalid cooperative slot")
     db.execute("INSERT INTO records VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -185,16 +206,19 @@ def import_snapshot(db, data, root):
     db.executemany("INSERT INTO artifacts VALUES(?,?,?)", [(rev, k, v) for k, v in artifacts.items()])
     for manifest in array(data.get("archives", [])):
         require(isinstance(manifest, str) and manifest in artifacts, "archive must be a pinned evidence manifest")
-        index_archive(db, rev, root, manifest, artifacts[manifest])
+        db.executemany("INSERT INTO archive_files VALUES(?,?,?,?,?)",
+                       ((rev, manifest, *entry) for entry in archive_entries(root, manifest, artifacts[manifest])))
     require(array(data["records"]), "empty research snapshot")
     for rec in data["records"]:
-        insert_record(db, rev, rec, artifacts)
+        insert_record(db, rev, rec, artifacts, targets)
     for link in array(data["links"]):
         fields(link, ("source", "target", "relation"))
-        check_id(link["relation"])
+        for field in ("source", "target", "relation"):
+            check_id(link[field])
         db.execute("INSERT INTO links VALUES(?,?,?,?)", (rev, link["source"], link["target"], link["relation"]))
     for need in array(data["needs"]):
         fields(need, ("issue", "key", "requirement"))
+        check_id(need["key"])
         require(positive(need["issue"]) and string(need["requirement"]), "invalid issue prerequisite")
         db.execute("INSERT INTO needs VALUES(?,?,?,?)", (rev, need["issue"], need["key"], need["requirement"]))
     return digest
@@ -244,7 +268,7 @@ def export(db, review, root):
 
 def private_profile(db, review, args):
     public = export(db, review, args.root)
-    require(public == read_json(args.mappings), "mapping document differs from the reviewed export")
+    require(encode(public) == encode(read_json(args.mappings)), "mapping document differs from the reviewed export")
     _, snap = original_snapshot(db, review["revision"])
     expected = snap["targets"].get(args.role)
     require(expected, "role not present in this snapshot")
@@ -351,7 +375,7 @@ def main():
                     _, original = original_snapshot(db, rev)
                     verify_files(args.root, original["artifacts"].items())
                     if args.archived:
-                        verify_files(args.root, db.execute("SELECT path,digest FROM archive_files WHERE revision=?", (rev,)))
+                        verify_archives(db, rev, args.root, original)
                     result = {"verified_revision": rev}
                 else:
                     result = records(db, args, rev)

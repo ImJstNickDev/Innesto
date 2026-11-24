@@ -28,7 +28,7 @@ python3 "$tool" verify "$db" --root .private
 python3 "$tool" snapshot "$db" --revision 1 > "$private_replay_file"
 ```
 
-Import checks each evidence file and commits a complete revision atomically. Reimporting an identical revision is safe. Correcting a claim requires the next revision. Archive manifests index historical paths and hashes without moving or copying the original files. `verify --archived` also rehashes every indexed historical regular file. Keep the evidence tree with the database when moving it. A database backup preserves the observations and receipts; the original files are required to reproduce them.
+Import checks each evidence file and commits a complete revision atomically. Reimporting an identical revision is safe. Correcting a claim requires the next revision. Archive manifests index historical paths and hashes without moving or copying the original files. `verify --archived` also rehashes every indexed historical regular file. Keep the evidence tree with the database when moving it. A database backup preserves the observations and receipts. Keep the original evidence files for replay.
 
 | State | Meaning |
 | --- | --- |
@@ -38,11 +38,26 @@ Import checks each evidence file and commits a complete revision atomically. Rei
 
 Record confidence separately from state. A high-confidence candidate can still have an unknown calling convention. Track the issue's missing prerequisite even when a related observable behavior is verified. A save containing a crafted item, for example, establishes persistence. Determining which side validated the ingredient debit takes separate evidence.
 
+## Findings and outstanding gameplay dependencies
+
+The a1.2.10 study covered three installed roles and two distinct executable images. Of 63 client–dedicated comparisons in the selected sample, independent checks supported three correspondences. Two further pairs remain candidates. The short terrain descriptor routine matched in both images and was sampled during dedicated catalogue loading. The native signature and its execution on the client remain open questions.
+
+At 25 sampled terrain columns, material and elevation agreed between the seed inspector and the live world at every corresponding centre. A shifted alignment matched at most 11. In a Solo crafting sequence, the saved inventory already contained the crafted tool one checkpoint before the game saved its discovery. These controls give the generation and crafting investigations reproducible ways to check output.
+
+| Issue | Evidence still required |
+| --- | --- |
+| [#3](https://github.com/ImJstNickDev/Innesto/issues/3) | A mod controls the authoritative pre-break decision, with ordered listeners, correct drops, feedback and reconnect behavior. |
+| [#4](https://github.com/ImJstNickDev/Innesto/issues/4) | An independently built mod changes a real decision through the documented installation and removal workflow. |
+| [#5](https://github.com/ImJstNickDev/Innesto/issues/5) | The server accepts a mod-defined recipe that the client displays and that disappears on removal. |
+| [#36](https://github.com/ImJstNickDev/Innesto/issues/36) | An independent observation identifies server validation or ingredient debit for the crafting transaction. |
+| [#45](https://github.com/ImJstNickDev/Innesto/issues/45) | A selective purge covers all occupied stores and terrain, with recovery, reconnect and reinstall controls. |
+| [#47](https://github.com/ImJstNickDev/Innesto/issues/47) | A mod-defined rule generates naturally harvestable material while preserving populated terrain and peer compatibility. |
+
 ## From a finding to a binding
 
 1. Identify a semantic operation in a subsystem. Keep the measured behavior, the candidate function and any cross-image correspondence in separate records linked by explicit relationships.
 2. Confirm the operation on each supported role using independent evidence. For a callable interface, establish the native signature, operand type, lifetime, execution context and failure behavior. Similarity scores and inferred prototypes do not satisfy this requirement.
-3. Review each distributable identifier and typed mapping against the exact snapshot. Record the reviewer and the distribution basis for each selection in a separate private review document. A semantic-only grant can publish an Innesto identifier. A binding grant also requires a verified declaration of a supported cooperative slot.
+3. Review each distributable identifier and typed mapping against the exact snapshot. Record the reviewer and the distribution basis for each selection in a separate private review document. A semantic-only grant can publish an Innesto identifier. A binding grant also requires a verified declaration of a supported cooperative slot. The catalogue accepts the canonical prototypes `int(opaque const*)` for a rule and `position(opaque const*)` for a position projection.
 4. Export the reviewed fields, inspect the diff and submit the original declaration and its tests through a PR. Pair the result privately with the reviewed image before use. The native adapter checks the exact profile, expected kind and operand before a hook or typed projection can be installed. Advertise the high-level capability only after the binding succeeds and the actual game meets its acceptance criteria. [Native mapping adapter](native-mappings.md)
 
 ```sh

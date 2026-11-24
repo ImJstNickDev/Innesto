@@ -4,6 +4,21 @@ import json
 from pathlib import Path
 
 
+def verify_target(instruction, expected):
+    # Decode the RIP-relative x86-64 LEA independently of the importer. Its
+    # signed disp32 counts from the end of the instruction. REX, segment and
+    # operand-size prefixes do not change that base; address-size override does.
+    raw = bytes(int(value) & 255 for value in instruction.getBytes())
+    prefix = raw[:-6]
+    if (len(raw) < 6 or raw[-6] != 0x8d or raw[-5] & 0xc7 != 0x05
+            or any(value not in (0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65, 0x66)
+                   and not 0x40 <= value <= 0x4f for value in prefix)):
+        raise ValueError("reference site is not a RIP-relative LEA")
+    displacement = int.from_bytes(raw[-4:], "little", signed=True)
+    if instruction.getAddress().add(len(raw) + displacement) != expected:
+        raise ValueError("saved LEA targets a different literal address")
+
+
 def verify(install, project_dir, project_name, program_name, plan, report):
     import pyghidra
 
@@ -20,11 +35,18 @@ def verify(install, project_dir, project_name, program_name, plan, report):
             memory = program.getMemory()
             base = program.getImageBase()
             elf_base = int(plan["elf_base"], 16)
+            from ghidra.program.model.address import AddressSet
             for row in plan["functions"]:
                 record = matches[row["entry"]]
                 entry = base.add(int(row["entry"], 16) - elf_base)
-                if not row.get("sites_only") and program.getFunctionManager().getFunctionAt(entry) is None:
-                    raise ValueError("missing function in saved project")
+                end = base.add(int(row["end"], 16) - elf_base - 1)
+                if int(record["ghidra_entry"], 16) != entry.getOffset():
+                    raise ValueError("report entry disagrees with saved project")
+                scope = AddressSet(entry, end)
+                if not row.get("sites_only"):
+                    function = program.getFunctionManager().getFunctionAt(entry)
+                    if function is None or not scope.contains(function.getBody()):
+                        raise ValueError("saved function missing or outside selected unwind extent")
                 if record["confirmed_references"] != row["references"]:
                     raise ValueError("headless Ghidra did not confirm all planned references")
                 for ref in row["references"]:
@@ -33,6 +55,9 @@ def verify(install, project_dir, project_name, program_name, plan, report):
                     instruction = program.getListing().getInstructionAt(site)
                     if instruction is None or str(instruction.getMnemonicString()).upper() != "LEA":
                         raise ValueError("saved reference site is not a decoded LEA")
+                    if not scope.contains(site, instruction.getMaxAddress()):
+                        raise ValueError("saved reference site falls outside selected unwind extent")
+                    verify_target(instruction, data)
                     for i, byte in enumerate(ref["anchor"].encode("ascii") + b"\0"):
                         if memory.getByte(data.add(i)) & 255 != byte:
                             raise ValueError("saved literal bytes disagree")
