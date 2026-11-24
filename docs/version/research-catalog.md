@@ -40,9 +40,23 @@ Record confidence separately from state. A high-confidence candidate can still h
 
 ## Findings and outstanding gameplay dependencies
 
-The a1.2.10 study covered three installed roles and two distinct executable images. Of 63 client–dedicated comparisons in the selected sample, independent checks supported three correspondences. Two further pairs remain candidates. The short terrain descriptor routine matched in both images and was sampled during dedicated catalogue loading. The native signature and its execution on the client remain open questions.
+The initial a1.2.10 study covered three installed roles and two distinct executable images. Of 63 client–dedicated comparisons in the selected sample, independent checks supported three correspondences. Two further pairs remain candidates. The short terrain descriptor routine matched in both images and was sampled during dedicated catalogue loading. The native signature and its execution on the client remain open questions.
 
 At 25 sampled terrain columns, material and elevation agreed between the seed inspector and the live world at every corresponding centre. A shifted alignment matched at most 11. In a Solo crafting sequence, the saved inventory already contained the crafted tool one checkpoint before the game saved its discovery. These controls give the generation and crafting investigations reproducible ways to check output.
+
+### Material lookup, saved stacks and crafting
+
+The follow-up catalogue tracks 60 unique game functions across the two images, up from 13. A function is counted once per executable and entry. The 41 semantic names include homologous functions under a shared name. Dedicated and Solo execution observations retain their own roles. Nine function records have independent evidence for their stated purpose. Three dedicated records have a verified machine contract within the documented calling conditions.
+
+| Operation | Evidence from the installed dedicated server | Boundary for an adapter |
+| --- | --- | --- |
+| Count initialized material slots | A stock generator check returned 435. Adding 8,192 rows made the same operation return 8,627. Independent server catalogues agreed with both values. | Count includes stock, reserved and empty-material slots. First initialization and teardown have a separate lifecycle. |
+| Resolve an exact material name | A valid zero-slot name and a missing name both returned zero. The accompanying success flag distinguished them. Changing the case of a known name produced a miss. A stock material’s lookup name and its dashboard key also gave different results. | A lookup API needs an explicit success result and a documented name space. The confirmed caller ran on the dedicated main thread with writable result storage. |
+| Normalize a saved item code | During player-save reads in two isolated dedicated processes, the same alternative code normalized to the canonical value in both hotbar and bag. The canonical input stayed unchanged. Static analysis accounted for the other return paths. | This converts a code. Stack quantity, ownership and crafting authorization belong to separate operations. |
+
+Twelve isolated server boots tested when the active material roster is chosen. In eight crossover boots the staged descriptor on disk changed after startup. Sixteen subsequent dashboard reads still showed the original IDs and properties. Sixteen operator placements independently resolved the original IDs. Separate fresh boots with the changed descriptor confirmed that it did change the roster. For these ordinary operations, prepare the complete descriptor before launch.
+
+On the client, the crafting grid consumes a stock recipe collection. Stock result counts agreed with an archived Survival craft. During two player crafting intervals, the dedicated server logged inventory saves. The component responsible for approving the ingredient debit remains unknown. The existing recipe-registration and authority gates below still apply.
 
 | Issue | Evidence still required |
 | --- | --- |
