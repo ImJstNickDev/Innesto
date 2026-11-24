@@ -1,0 +1,17 @@
+.navbar.bg-primary {
+  background: #193c37 !important;
+}
+
+.navbar-brand {
+  display: inline-flex;
+  gap: 0.45rem;
+  align-items: center;
+  font-weight: 650;
+}
+
+.navbar-brand::before {
+  content: "";
+  width: 1.8rem;
+  height: 1.8rem;
+  background: url("innesto.svg") center / contain no-repeat;
+}
