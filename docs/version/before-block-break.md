@@ -4,8 +4,9 @@ An Innesto version adapter connects a block-break decision inside the simulation
 to mod listeners. The simulation checks a proposed edit before removing the
 block, dropping an item or confirming success to the player.
 
-The draft targets Openworld a1.2.10 on Linux x86-64. It works in the adapted
-native test executable. The distributed server still returns
+The a1.2.10 adapter can supply the event on Linux x86-64 when it resolves
+the native rule and coordinate type for the verified executable. Both
+original adapted test hosts supply it. The distributed dedicated server returns
 `INNESTO_BREAK_UNAVAILABLE` because its decision site has yet to be connected.
 [Issue #3](https://github.com/ImJstNickDev/Innesto/issues/3) tracks in-game acceptance.
 
@@ -55,6 +56,16 @@ event optionally can continue without it on `UNAVAILABLE`. Build these mods
 with the draft header and loader from the same checkout. Earlier loaders lack
 the registration function.
 
+API 2 mods can discover this event by calling
+`innesto_query_capability_v1(ctx, INNESTO_CAP_BEFORE_BLOCK_BREAK, 1)` and
+assigning the result to a `const struct innesto_before_block_break_api_v1 *`.
+A null result means the process has no verified binding. Call
+`api->register_listener(keep_block)` during initialization to subscribe. A
+mod that treats the event as optional can continue on a null result. The
+listener runs on the logical server. An integrated simulation can supply it
+inside a physical client. The [environment guide](environments.md) covers
+process-lifetime contexts and logical callback scope.
+
 ## Run the example
 
 From the repository root, run the tests on Linux x86-64 with the
@@ -77,19 +88,23 @@ Audit records each attempt. Guard vetoes attempts where `x == 0`.
 
 ## How the decision reaches a mod
 
-The loader supplies `innesto_adapter_attach_before_block_break_v1` to the
-version adapter. The adapter owns the call at the decision site and attaches
-it at startup. Innesto closes attachment before opening any mod libraries.
-An attached site can dispatch to listeners after all mod initializers succeed.
-The game's executable can keep its gameplay functions private.
+The launcher passes the digest of the executable it verified, along with
+the physical environment, to the bootstrap. Before loading mods, the
+a1.2.10 adapter selects an exact build record and resolves the semantic
+names `block.break.permitted` and `block.position`. It binds the typed
+decision hook and publishes the capability. If publication fails, it
+disconnects the hook. The [native mapping contract](native-mappings.md)
+describes selection, slot kinds and binding errors.
 
-The tests build two executables from the same simulation object files. One
-runs its original block rule. The other links an adapter at that internal
-rule. The original rule runs first, so an attempt to break an already empty
-position never reaches the listeners. For a valid attempt, the adapter asks
-Innesto for a decision before the simulation edits the block. A pass continues
-the normal action. On veto the fixture preserves the block and corrects the
-predicted state in its modeled client.
+The test hosts share the same simulation objects. Two adapted links wrap
+the original rule for dedicated and integrated play. CMake strips those
+executables and records each fixture's reference digest at build time.
+The fixture offers its catalog during preinitialization. On a verified
+match, the native rule runs once and an allowed attempt reaches registered
+listeners before the edit. A veto preserves the block and restores the
+modeled client view. A byte-modified executable, a mismatched physical
+environment and a host without a catalog all retain ordinary behavior.
+The loader contains no mapping record for the distributed game.
 
 ## Verify the game integration
 

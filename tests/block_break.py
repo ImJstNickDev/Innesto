@@ -44,7 +44,17 @@ class BlockBreakTests(unittest.TestCase):
             "api": 1, "environment": "server", "entrypoint": "probe.so", "depends": {"break_guard": "*"},
         }), encoding="utf-8")
 
-    def launch(self, *packages, host=None):
+        capability = cls.packages / "capability"
+        capability.mkdir()
+        subprocess.run([CC, "-std=c11", "-shared", "-fPIC", "-I", ROOT / "include",
+                        ROOT / "tests/block_break_capability.c", "-o", capability / "inspect.so"],
+                       check=True)
+        (capability / "innesto.mod.json").write_text(json.dumps({
+            "schemaVersion": 1, "id": "inspect_break", "version": "1.0.0", "game": "a1.2.10",
+            "api": 2, "environment": "shared", "entrypoint": "inspect.so",
+        }), encoding="utf-8")
+
+    def launch(self, *packages, host=None, physical="server"):
         scratch = tempfile.TemporaryDirectory(dir=self.work)
         self.addCleanup(scratch.cleanup)
         run_dir = Path(scratch.name)
@@ -55,7 +65,8 @@ class BlockBreakTests(unittest.TestCase):
         executable = host or self.host
         profile = run_dir / "fixture.json"
         profile.write_text(json.dumps({
-            "version": "a1.2.10", "platform": "linux-x86_64", "executable": str(executable),
+            "version": "a1.2.10", "platform": "linux-x86_64", "environment": physical,
+            "executable": str(executable),
             "sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
         }), encoding="utf-8")
         env = {key: value for key, value in os.environ.items()
@@ -74,6 +85,27 @@ class BlockBreakTests(unittest.TestCase):
             with self.subTest(executable=executable.name):
                 exported = subprocess.check_output(["nm", "-D", "--defined-only", executable], text=True)
                 self.assertNotRegex(exported, r"\binnesto_\w+")
+
+    def test_stripped_simulations_report_the_logical_server_inside_each_process(self):
+        for physical, name in (("server", "host"), ("client", "integrated")):
+            with self.subTest(physical=physical):
+                executable = BUILD / ("innesto-test-block-break-" + name)
+                sections = subprocess.check_output(["readelf", "-SW", executable], text=True)
+                self.assertNotIn(".symtab", sections)
+                self.assert_outcome(self.launch("capability", host=executable, physical=physical),
+                                    DENIED, [f"inspect {physical}/server {FIRST}",
+                                             f"inspect {physical}/server {SECOND}"])
+
+    def test_capability_absent_on_unmapped_build_and_mismatched_physical_target(self):
+        changed = self.work / "different-build"
+        shutil.copy2(self.host, changed)
+        with changed.open("ab") as stream:
+            stream.write(b"distinct fixture build")
+        for executable, physical in ((self.vanilla, "server"), (self.host, "client"),
+                                     (changed, "server")):
+            with self.subTest(executable=executable.name, physical=physical):
+                self.assert_outcome(self.launch("capability", host=executable, physical=physical),
+                                    ALLOWED, ["inspect unavailable"])
 
     def test_without_loader_or_listeners_both_hosts_commit_once(self):
         for executable in (self.vanilla, self.host):

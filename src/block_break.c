@@ -1,4 +1,5 @@
 #include "block_break_adapter.h"
+#include "runtime_adapter.h"
 
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -64,10 +65,18 @@ static int before_block_break(const struct innesto_block_break_v1 *attempt)
     return INNESTO_BREAK_PASS;
 }
 
-int innesto_adapter_attach_before_block_break_v1(innesto_before_block_break_v1 *site)
+static const struct innesto_before_block_break_api_v1 block_break_api = {
+    innesto_register_before_block_break_v1
+};
+
+int innesto_adapter_attach_before_block_break_v1(innesto_before_block_break_v1 *site, uint32_t physical)
 {
     enum adapter_state expected = AWAITING_ADAPTER;
     if (!site || !atomic_compare_exchange_strong(&state, &expected, ADAPTER_ATTACHED)) {
+        return 0;
+    }
+    if (!innesto_adapter_provide_v1(physical, INNESTO_CAP_BEFORE_BLOCK_BREAK, 1, &block_break_api)) {
+        atomic_store(&state, NO_ADAPTER);
         return 0;
     }
     *site = before_block_break;

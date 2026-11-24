@@ -7,12 +7,9 @@
 extern "C" {
 #endif
 
-/* The version adapter calls this from its installed decision site's startup
- * code, before mod initialization. On success, store the dispatcher at site
- * and return 1. On failure, leave the destination untouched and return 0.
- * The adapter forwards valid attempts on the simulation thread after startup. */
-__attribute__((visibility("default")))
-int innesto_adapter_attach_before_block_break_v1(innesto_before_block_break_v1 *site);
+/* Publish a successfully bound decision on this physical target. On failure,
+ * leave the destination untouched so the version adapter can roll back. */
+int innesto_adapter_attach_before_block_break_v1(innesto_before_block_break_v1 *site, uint32_t physical);
 
 /* Loader-private startup steps. */
 void innesto_block_break_bypass(void);

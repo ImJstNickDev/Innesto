@@ -11,11 +11,11 @@ target_include_directories(innesto-native-adapter PUBLIC src)
 target_compile_features(innesto-native-adapter PUBLIC c_std_11)
 set_target_properties(innesto-native-adapter PROPERTIES POSITION_INDEPENDENT_CODE ON C_VISIBILITY_PRESET hidden)
 
-add_library(innesto-bootstrap MODULE src/bootstrap.c src/runtime.c src/block_break.c)
+add_library(innesto-bootstrap MODULE src/bootstrap.c src/runtime.c src/block_break.c src/adapters/a1_2_10/simulation.c)
 target_include_directories(innesto-bootstrap PRIVATE include)
 set_target_properties(innesto-bootstrap PROPERTIES PREFIX "" C_VISIBILITY_PRESET hidden)
 target_compile_features(innesto-bootstrap PRIVATE c_std_11)
-target_link_libraries(innesto-bootstrap PRIVATE ${CMAKE_DL_LIBS})
+target_link_libraries(innesto-bootstrap PRIVATE innesto-native-adapter ${CMAKE_DL_LIBS})
 
 # Keep the checked identity with the built bootstrap, including multi-config builds.
 add_custom_target(innesto-loader ALL
@@ -29,19 +29,24 @@ if(BUILD_TESTING)
     find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
     add_subdirectory(tests/mappings)
     add_executable(innesto-test-host tests/host.c)
-    # Both executables use exactly the same simulation objects. The adapted
-    # executable adds a decision-site wrapper and an Innesto adapter at link time.
+    # Plain, dedicated and integrated links share the same simulation objects.
     add_library(innesto-test-simulation OBJECT tests/block_break_host.c tests/block_break_rules.c)
     # Keep the rule call visible to the native linker even in an LTO build.
     target_compile_options(innesto-test-simulation PRIVATE -fno-lto)
     add_executable(innesto-test-block-break-vanilla $<TARGET_OBJECTS:innesto-test-simulation>)
-    add_library(innesto-test-break-adapter SHARED tests/block_break_adapter.c)
-    target_include_directories(innesto-test-break-adapter PRIVATE include src)
-    add_executable(innesto-test-block-break-host
-        $<TARGET_OBJECTS:innesto-test-simulation> tests/block_break_wrap.c)
-    target_link_options(innesto-test-block-break-host PRIVATE "LINKER:--wrap=fixture_break_permitted")
-    target_link_libraries(innesto-test-block-break-host PRIVATE innesto-test-break-adapter)
-    add_executable(innesto-test-break-dispatch tests/block_break_dispatch.c src/block_break.c)
+    function(add_simulation_fixture target environment)
+        add_executable(${target} $<TARGET_OBJECTS:innesto-test-simulation> tests/block_break_wrap.c)
+        target_link_libraries(${target} PRIVATE innesto-native-adapter)
+        target_compile_definitions(${target} PRIVATE FIXTURE_ENVIRONMENT="${environment}"
+            FIXTURE_STAMP="$<TARGET_FILE_DIR:${target}>/${target}.sha256")
+        target_link_options(${target} PRIVATE "LINKER:--wrap=fixture_break_permitted" "LINKER:--strip-all")
+        add_custom_command(TARGET ${target} POST_BUILD COMMAND "${CMAKE_COMMAND}"
+            "-Dimage=$<TARGET_FILE:${target}>" -P "${PROJECT_SOURCE_DIR}/tests/mappings/RecordIdentity.cmake"
+            VERBATIM)
+    endfunction()
+    add_simulation_fixture(innesto-test-block-break-host server)
+    add_simulation_fixture(innesto-test-block-break-integrated client)
+    add_executable(innesto-test-break-dispatch tests/block_break_dispatch.c src/block_break.c src/runtime.c)
     target_include_directories(innesto-test-break-dispatch PRIVATE include src)
     target_compile_features(innesto-test-break-dispatch PRIVATE c_std_11)
     add_test(NAME block-break-dispatch COMMAND innesto-test-break-dispatch)

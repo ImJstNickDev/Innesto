@@ -1,9 +1,6 @@
 # Openworld a1.2.10
 
-Innesto loads native mods at process startup on Linux x86-64. The dedicated
-server has real-game acceptance. Original host fixtures exercise client and
-server package selection.
-Each mod has a manifest, an independently built shared library and a C
+Innesto loads native mods at process startup on Linux x86-64. Each mod has a manifest, an independently built shared library and a C
 entrypoint. The loader validates the selected packages and initializes them
 in dependency order before the host enters `main`.
 
@@ -12,7 +9,17 @@ in dependency order before the host enters `main`.
 - [Native mod initialization](native-initialization.md) describes the public C entrypoint, the private target profile and how to launch a single library.
 - [Native mappings](native-mappings.md) describes exact-build function and type resolution, typed decision hooks, and the original stripped fixtures.
 
-The [draft block-break listener](before-block-break.md) can be exercised with
-two native builds of the same test simulation. The adapted build calls the
-listener at its internal block rule. Connecting the corresponding decision
-in the dedicated server remains open.
+## Verified behavior
+
+| Target | Observed behavior |
+| --- | --- |
+| Openworld dedicated server | The shared and server example packages initialize and receive startup completion. A local world starts and the server shuts down normally. |
+| Original Openworld client | The unmodified client reached the menu in an isolated offline run. Client mod initialization has been exercised on the original Innesto fixtures. |
+| Innesto's stripped simulation fixtures | The [before-block-break capability](before-block-break.md) dispatches on the logical server in both dedicated and integrated configurations. A veto preserves the modeled block and suppresses its drop. |
+
+Innesto's client mod tests use original fixtures. The game's terms restrict
+use of a modified client. [Openworld terms of use, section 6](https://www.play-openworld.com/legal/en/conditions).
+
+[Issue #3](https://github.com/ImJstNickDev/Innesto/issues/3) tracks the
+decision and player-visible veto in the distributed game. It gates the
+[first development release](https://github.com/ImJstNickDev/Innesto/milestone/1).

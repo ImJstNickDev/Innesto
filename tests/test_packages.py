@@ -160,14 +160,15 @@ class PackageTests(unittest.TestCase):
         mod_list = runpy.run_path(str(LAUNCHER))["mod_list"]
         libraries = [self.mods / os.fsdecode(b"\xff\n :module.so"), self.mods / "last.so"]
         mods = [SelectedMod(path, f"test{i}", i + 1) for i, path in enumerate(libraries)]
-        with mod_list("server", mods) as plan:
+        digest = "a" * 64
+        with mod_list("server", digest, mods) as plan:
             self.assertGreaterEqual(plan.fileno(), 3)
             self.assertFalse(os.get_inheritable(plan.fileno()))
-            self.assertEqual(plan.read(), b"Innesto/2\0server\0" + b"1\0test0\0" +
+            self.assertEqual(plan.read(), b"Innesto/3\0server\0" + digest.encode() + b"\0" + b"1\0test0\0" +
                              os.fsencode(libraries[0]) + b"\0" + b"2\0test1\0" +
                              os.fsencode(libraries[1]) + b"\0")
-        with mod_list("client", []) as plan:
-            self.assertEqual(plan.read(), b"Innesto/2\0client\0")
+        with mod_list("client", digest, []) as plan:
+            self.assertEqual(plan.read(), b"Innesto/3\0client\0" + digest.encode() + b"\0")
 
     def test_both_cli_modes_check_resolved_paths_for_glibc_tokens_before_launch(self):
         host = self.scratch / "host"

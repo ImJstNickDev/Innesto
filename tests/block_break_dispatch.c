@@ -1,4 +1,5 @@
 #include <innesto/block_break.h>
+#include <innesto/runtime.h>
 #include "block_break_adapter.h"
 
 #include <stddef.h>
@@ -31,23 +32,23 @@ static int unknown_result(const struct innesto_block_break_v1 *attempt)
 static int check_unattached(void)
 {
     innesto_before_block_break_v1 site = pass;
-    if (innesto_adapter_attach_before_block_break_v1(NULL) != 0) {
+    if (innesto_adapter_attach_before_block_break_v1(NULL, INNESTO_PHYSICAL_SERVER) != 0) {
         fputs("null site unexpectedly attached\n", stderr);
         return 1;
     }
     innesto_block_break_seal_adapter();
-    if (innesto_adapter_attach_before_block_break_v1(&site) != 0 || site != pass) {
+    if (innesto_adapter_attach_before_block_break_v1(&site, INNESTO_PHYSICAL_SERVER) != 0 || site != pass) {
         fputs("adapter attached during mod library discovery\n", stderr);
         return 1;
     }
     innesto_block_break_open_registration();
-    if (innesto_adapter_attach_before_block_break_v1(&site) != 0 || site != pass ||
+    if (innesto_adapter_attach_before_block_break_v1(&site, INNESTO_PHYSICAL_SERVER) != 0 || site != pass ||
         innesto_register_before_block_break_v1(pass) != INNESTO_BREAK_UNAVAILABLE) {
         fputs("missing adapter was accepted during initialization\n", stderr);
         return 1;
     }
     innesto_block_break_finish_registration();
-    return innesto_adapter_attach_before_block_break_v1(&site) != 0 || site != pass ||
+    return innesto_adapter_attach_before_block_break_v1(&site, INNESTO_PHYSICAL_SERVER) != 0 || site != pass ||
            innesto_register_before_block_break_v1(pass) != INNESTO_BREAK_UNAVAILABLE;
 }
 
@@ -60,8 +61,8 @@ int main(int argc, char **argv)
     } else if (argc != 1) {
         return 2;
     }
-    if (innesto_adapter_attach_before_block_break_v1(&before_break) != 1 || !before_break ||
-        innesto_adapter_attach_before_block_break_v1(&second_site) != 0 || second_site != unknown_result ||
+    if (innesto_adapter_attach_before_block_break_v1(&before_break, INNESTO_PHYSICAL_SERVER) != 1 || !before_break ||
+        innesto_adapter_attach_before_block_break_v1(&second_site, INNESTO_PHYSICAL_SERVER) != 0 || second_site != unknown_result ||
         innesto_register_before_block_break_v1(pass) != INNESTO_BREAK_CLOSED ||
         before_break(&attempt) != INNESTO_BREAK_VETO || calls != 0) {
         fputs("attachment must succeed only once before initialization\n", stderr);
