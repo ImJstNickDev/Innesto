@@ -1,0 +1,31 @@
+name: Saved block totals
+
+on:
+  pull_request:
+    branches: ['game/a1.2.10']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  adapter:
+    name: Check optional save reader
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install JSON development headers
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libjansson-dev
+      - name: Build and exercise the optional adapter
+        run: |
+          cmake -S . -B build/reader -DINNESTO_SAVED_BLOCKS=ON -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_FLAGS="-Wall -Wextra -Werror -pedantic"
+          cmake --build build/reader --parallel --target innesto-loader innesto-test-host
+          ctest --test-dir build/reader --output-on-failure -R '^saved-blocks$'
+      - name: Build the independent example
+        run: |
+          cmake -S examples/saved-blocks -B build/example -DINNESTO_INCLUDE_DIR="$PWD/include"
+          cmake --build build/example
+          cmake --install build/example --prefix "$PWD/build/packages"

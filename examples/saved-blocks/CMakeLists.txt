@@ -1,0 +1,10 @@
+cmake_minimum_required(VERSION 3.18)
+project(innesto_saved_blocks_example LANGUAGES C)
+
+find_path(INNESTO_INCLUDE_DIR innesto/saved_blocks.h REQUIRED)
+add_library(saved-blocks MODULE query.c)
+target_include_directories(saved-blocks PRIVATE "${INNESTO_INCLUDE_DIR}")
+target_compile_features(saved-blocks PRIVATE c_std_11)
+set_target_properties(saved-blocks PROPERTIES PREFIX "" C_VISIBILITY_PRESET hidden)
+install(TARGETS saved-blocks LIBRARY DESTINATION saved-blocks)
+install(FILES innesto.mod.json DESTINATION saved-blocks)

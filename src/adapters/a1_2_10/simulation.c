@@ -1,4 +1,7 @@
 #include "simulation.h"
+#ifdef INNESTO_SAVED_BLOCKS
+#include "saved_blocks.h"
+#endif
 
 #include "block_break_adapter.h"
 #include "runtime_adapter.h"
@@ -45,6 +48,9 @@ void innesto_a1_2_10_activate(const struct innesto_native_identity *observed, ui
 {
     const struct innesto_native_profile *profile = NULL;
     sealed = 1;
+#ifdef INNESTO_SAVED_BLOCKS
+    innesto_a1_2_10_activate_saved_blocks(observed, physical);
+#endif
     if (!sites || innesto_native_select(observed, records, record_count, &profile) != INNESTO_NATIVE_OK) {
         return;
     }
