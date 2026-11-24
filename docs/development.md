@@ -8,11 +8,13 @@ Clone the project and start the preview server.
 ```sh
 git clone https://github.com/ImJstNickDev/Innesto.git
 cd Innesto
-uv run --project tools/docs --locked mkdocs serve
+git fetch origin --prune
+uv run --project tools/docs --locked python tools/docs/site.py serve
 ```
 
-Open <http://127.0.0.1:8000/>. Edits under `docs/` reload the preview. The
-documentation builds independently of any game installation.
+Open <http://127.0.0.1:8000/>. The site combines the shared guide and each fetched game
+branch’s `docs/version/` pages. The documentation builds independently of any
+game installation.
 
 ## Choose a branch
 
@@ -29,8 +31,21 @@ git switch -c docs/api-guide origin/main
 
 Use a descriptive prefix such as `feat/`, `fix/` or `docs/`. Keep game-specific
 examples and reference documentation alongside the implementation on its
-version branch. The published site follows `main`. When a version is released,
-link its tagged documentation from the compatibility table.
+version branch. Write version-specific pages in `docs/version/`, with `index.md`
+as their starting page. The site publishes them at `versions/<version>/`. When
+working on a feature branch for a game version, preview its local pages with
+`python tools/docs/site.py serve --game a1.2.10` in the documentation environment.
+
+`main` owns the shared README, branding, contributor guides and documentation
+tooling. To change one of those files, target `main`. After a merge, the sync
+workflow checks active game branches and prepares pull requests for shared
+changes. Version-specific code and guides stay on the game branch.
+
+A game branch PR must pass the shared-file check. To recover a stale branch,
+fetch the latest refs and run `python3 tools/docs/sync_shared.py pr --game game/a1.2.10`
+with an authenticated GitHub CLI. Merge the synchronization PR through the
+usual checks, then update any pending feature branch. Use the same command
+when Actions lacks permission to copy a changed workflow or open its PR.
 
 ## Submit a change
 
@@ -48,11 +63,12 @@ operate on the default branch.
 Run the documentation check from the root of the checkout.
 
 ```sh
-uv run --project tools/docs --locked mkdocs build --strict
+uv run --project tools/docs --locked python tools/docs/site.py build
 ```
 
 CI builds the guide and reports broken internal documentation links as errors.
-A merge to `main` publishes the guide on GitHub Pages. Changes to public behavior
+A successful push build on `main` or a game branch triggers a full site
+publication from the current branch tips. Changes to public behavior
 must update the version's reference and example in the same PR.
 
 ## Public and private material
