@@ -30,7 +30,13 @@ jobs:
             sudo apt-get update -qq
             sudo apt-get install -y --no-install-recommends bubblewrap
           fi
-          bwrap --unshare-user --unshare-pid --unshare-net --ro-bind / / -- true
+          # Some hosted kernels restrict unprivileged loopback setup. Run these
+          # isolated OS fixtures with permission there, without changing host policy.
+          probe=(bwrap --unshare-user --unshare-pid --unshare-net --ro-bind / / -- true)
+          if ! "${probe[@]}"; then
+            sudo "${probe[@]}"
+            sudo python3 -B tests/test_terrain_solo.py -v
+          fi
       - name: Exercise the example and target checks
         run: ctest --test-dir build/native --output-on-failure
 

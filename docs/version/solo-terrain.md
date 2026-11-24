@@ -46,3 +46,9 @@ tools/innesto-run --profile "$client_profile" \
 ```
 
 Launch normally after migration. Additions append after the world's existing materials regardless of package discovery order. If a provider is missing, restore its recorded package. If the launcher reports a definition mismatch, restore the compatible definition or preview a [supported migration](missing-terrain.md). A populated ordinary save cannot be enrolled by pointing `--solo-world` at it. Restore a managed save together with its complete registry and matching packages.
+
+## Verified in Solo Survival
+
+Copperfield and Reedbed were built separately. After preparing samples in Creative, the Survival player broke each material, collected the drop, held it and placed it back in the world. With the ordinary crafting grid, 16 ochre voxels and one stick produced a stone chisel. The same pattern with rush left the output empty. The complete inventory, the chisel and both placed materials survived a full client restart.
+
+Adding Aster to that played world preserved the original slots and appended chalk. The native catalogue displayed the new material and the player could select it. After returning to Survival, the saved inventory and edited region data matched the pre-migration world. A separate world created with all three packages assigned its own slot order. Missing Aster or changing Reedbed's family prevented startup and left that world byte-for-byte intact.
