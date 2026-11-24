@@ -48,6 +48,25 @@ def _index_providers(available):
     return index, problems
 
 
+def _omission_impact(bindings, available, base_count):
+    """Describe the saved slot layout if only the absent providers' rows were removed."""
+    absent = 0
+    shifted = 0
+    first = ""
+    for slot, (mid, provider) in enumerate(bindings.items(), base_count):
+        if provider not in available:
+            absent += 1
+        elif absent:
+            if not shifted:
+                first = f" The first is {mid!r} (slot {slot} to {slot - absent})."
+            shifted += 1
+    if not absent:
+        return ""
+    noun = "slot" if shifted == 1 else "slots"
+    return (f" If only rows with absent providers were omitted, {shifted} surviving {noun} would shift.{first}"
+            " Purge unavailable. Affected voxel and stack counts are unknown.")
+
+
 def provider_index(available):
     """Index primary and alternate IDs without permitting ambiguous or shadowed names."""
     index, problems = _index_providers(available)
@@ -273,8 +292,9 @@ class Registry:
             elif not migrate:
                 problems.append("adding materials requires offline migration: " + listed)
         if problems:
-            raise ValueError("terrain registry mismatch: " + "; ".join(problems)
-                             + ". Restore the required packages or restore a complete matching world backup;"
+            impact = _omission_impact(bindings, available, self.identity["baseCount"]) if migrate and not remaps else ""
+            raise ValueError("terrain registry mismatch: " + "; ".join(problems) + "." + impact
+                             + " Restore the required packages or restore a complete matching world backup;"
                                " preview a declared replacement with an explicit offline remap.")
         if not bindings and not additions:
             raise ValueError("no terrain package materials")

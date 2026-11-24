@@ -340,13 +340,22 @@ int main(int argc, char **argv) {
         save.write_bytes(b"saved inventory")
         backup = self.instance / "pre-transfer"
         (self.mods / "copperfield").rename(self.instance / "original")
-        shutil.copytree(self.base / "v2-packages/kiln", self.mods / "kiln")
         def offline(*options):
             cmd = self.command(*args)
             cmd[cmd.index("--"):cmd.index("--")] = options
             return subprocess.run(cmd, cwd=self.instance, capture_output=True, text=True, timeout=20,
                                   env={**os.environ, "XDG_CACHE_HOME": str(self.instance / "cache")})
 
+        for options in (["--preview-terrain"], ["--migrate-terrain", "--backup-world", backup]):
+            refused = offline(*options)
+            self.assert_refused(refused)
+            self.assertIn("1 surviving slot would shift", refused.stderr)
+            self.assertIn("'tidepool:lagoon' (slot 2 to 1)", refused.stderr)
+            self.assertEqual(registry.read_bytes(), before)
+            self.assertEqual(save.read_bytes(), b"saved inventory")
+            self.assertFalse(backup.exists())
+
+        shutil.copytree(self.base / "v2-packages/kiln", self.mods / "kiln")
         transfer = ["--remap-terrain", "copperfield:ochre=kiln:ochre"]
         self.assert_refused(self.launch(*args))
         self.assert_refused(offline("--migrate-terrain"))

@@ -65,3 +65,22 @@ In the a1.2.10 multiplayer test, the same player rejoined with Kiln, after a ful
 ## Why a slot stays occupied
 
 On a disposable dedicated server, omitting a middle catalogue entry moved the next material into its numeric slot. A populated multiplayer inventory held a stack at the original number. Keeping the declaration with a missing or empty texture preserved the number but left no usable texture. Substituting an ordinary rock for a plant changed solidity and rendering. Innesto reserves the slot by retaining its verified definition through an installed provider. There is no general purge or automatic placeholder policy. A destructive removal would require complete coverage of every place the game can persist that identity.
+
+## Can I delete the material from my world?
+
+On a1.2.10, removing Copperfield from the package directory makes Innesto refuse to open a world that still binds its material. To inspect a stopped world, point the existing preview at the proposed package directory, including the mods you intend to keep.
+
+```sh
+tools/innesto-run --profile "$server_profile" --loader build/native/innesto-bootstrap.so \
+  --mods-dir "$next_mods" --preview-terrain -- --data-dir "$world_dir"
+```
+
+For missing providers the command exits with an error. It lists the missing IDs and slots, the number of surviving slots that would move if just those rows were dropped, and the first such move. For example, in a world created with Copperfield and Reedbed and later extended with Aster, removing Copperfield would move both remaining materials. Even a missing material in the last slot can still occur in terrain and inventories. Counts of affected voxels and stacks are unknown. Applying this package set with `--migrate-terrain` also stops before writing a backup or changing the world.
+
+### What the game tools could verify
+
+- **Terrain.** A native operator edit at a known location persisted real AIR across a restart. At a different location, one metre-wide edit erased voxels of two different materials. A selective editor must find and change only matching voxels throughout every saved region and planet, including unloaded ones.
+- **Stored items.** The saved player held 19 ochre in one stack and had a separate discovery entry for the same material. Containers also persist their contents on the server. A complete purge needs an item-aware traversal and writer for occupied containers and other item stores, including cargo and machine filters. The dashboard counted loose items in a controlled test, but did not identify each stack. Whether all drop types can reload is unresolved. [Openworld chest guide](https://www.play-openworld.com/en-gb/wiki/getting-started/interface-inventory-chests/)
+- **Verification.** The native world verifier accepted a populated world and an identical backup both with the original catalogue and with Copperfield absent. A separately started server showed that Reedbed then occupied Copperfield's former slot. In another control, changing only whitespace in a player save made the verifier report a difference. It compares the bytes of that file and cannot certify item-level edits.
+
+Until these references can be counted and rewritten, keep the recorded packages to reopen the world or use the explicit equivalent-provider transfer above. [Track destructive removal in issue #45](https://github.com/ImJstNickDev/Innesto/issues/45).

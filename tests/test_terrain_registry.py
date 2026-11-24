@@ -196,6 +196,25 @@ class RegistryTest(unittest.TestCase):
             for part in ("missing", "stone:top", "slot 7", "wool:red", "slot 8", "restore"):
                 self.assertIn(part, message)
 
+    def test_offline_omission_reports_registry_impact_without_guessing_world_counts(self):
+        ids = ["demo:a", "demo:b", "demo:c", "demo:d", "demo:e"]
+        self.registry().accept({mid: material(mid) for mid in ids})
+        before = self.path.read_bytes()
+        for missing, expected in (
+            ({"demo:a"}, "4 surviving slots would shift. The first is 'demo:b' (slot 8 to 7)"),
+            ({"demo:b", "demo:d"}, "2 surviving slots would shift. The first is 'demo:c' (slot 9 to 8)"),
+            ({"demo:a", "demo:b", "demo:d"}, "2 surviving slots would shift. The first is 'demo:c' (slot 9 to 7)"),
+            ({"demo:d"}, "1 surviving slot would shift. The first is 'demo:e' (slot 11 to 10)"),
+            ({"demo:e"}, "0 surviving slots would shift"),
+            (set(ids), "0 surviving slots would shift"),
+        ):
+            with self.subTest(missing=missing), self.assertRaises(ValueError) as refusal:
+                self.registry().bind({mid: () for mid in ids if mid not in missing}, migrate=True)
+            self.assertIn(expected, str(refusal.exception))
+            self.assertIn("Affected voxel and stack counts are unknown", str(refusal.exception))
+            self.assertEqual(self.path.read_bytes(), before)
+            self.assertEqual(list(self.world.iterdir()), [self.path])
+
     def test_alias_index_and_stale_or_modified_preview_inputs(self):
         providers = {"next:top": ("stone:top", "ancient:top"), "wool:red": ()}
         self.assertEqual(provider_index(providers), {"next:top": "next:top", "stone:top": "next:top",
