@@ -43,6 +43,15 @@ class ConcurrentSyncTests(unittest.TestCase):
         self.git("commit", "-qam", "docs: refresh readme")
         self.source = self.git("rev-parse", "HEAD").decode().strip()
 
+    def test_maintainer_instructions_propagate_with_shared_guides(self):
+        Path("AGENTS.md").write_text("Use original fixtures in public CI.")
+        self.git("add", "AGENTS.md")
+        self.git("commit", "-qm", "docs: record fixture policy")
+        base = "refs/remotes/origin/" + GAME
+        changes = sync_shared.shared_diff(base, "HEAD")
+        tree = sync_shared.shared_tree(base, "HEAD", changes)
+        self.assertEqual(self.git("show", tree + ":AGENTS.md"), Path("AGENTS.md").read_bytes())
+
     def raced_create(self, *, same_repository):
         error = subprocess.CalledProcessError(1, "gh pr create")
         calls = []
