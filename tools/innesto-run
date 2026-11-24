@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Start the supported local dedicated server with trusted Innesto mods."""
+"""Start the supported local target with trusted Innesto mods."""
 
 import argparse
 from contextlib import contextmanager
@@ -15,7 +15,7 @@ import stat
 import struct
 import sys
 
-from innesto_packages import discover_mods
+from innesto_packages import SelectedMod, select_packages
 
 
 ET_EXEC = 2
@@ -38,7 +38,10 @@ def read_profile(path):
     digest = data.get("sha256")
     if not isinstance(digest, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", digest):
         raise ValueError("target profile requires a SHA-256 fingerprint")
-    return executable, digest.lower()
+    environment = data.get("environment", "server")
+    if environment not in ("client", "server"):
+        raise ValueError("target environment must be 'client' or 'server'")
+    return executable, digest.lower(), environment
 
 
 def elf_segments(stream):
@@ -93,14 +96,16 @@ def validate_mod_path(path):
         token = LOADER_TOKEN.search(part)
         if token:
             raise ValueError(f"dynamic loader token {token[0]!r} in mod path component {part!r}: "
-                             "rename that file or directory before starting the server")
+                             "rename that file or directory before starting the target")
 
 
 @contextmanager
-def mod_list(mods):
+def mod_list(environment, mods):
     with os.fdopen(os.memfd_create("innesto-mod-list", os.MFD_CLOEXEC), "wb") as plan:
+        plan.write(b"Innesto/2\0" + environment.encode("ascii") + b"\0")
         for mod in mods:
-            plan.write(os.fsencode(mod) + b"\0")
+            plan.write(str(mod.api).encode("ascii") + b"\0" + mod.mod_id.encode("ascii") + b"\0")
+            plan.write(os.fsencode(mod.library) + b"\0")
         plan.seek(0)
         fd = fcntl.fcntl(plan.fileno(), fcntl.F_DUPFD_CLOEXEC, 3)
         with os.fdopen(fd, "rb") as inherited:
@@ -110,7 +115,7 @@ def mod_list(mods):
 def run(args):
     if sys.platform != "linux" or platform.machine() != "x86_64":
         raise ValueError("unsupported target platform")
-    executable, expected_digest = read_profile(args.profile)
+    executable, expected_digest, environment = read_profile(args.profile)
     # The executable descriptor stays open from validation through execve.
     with open(executable, "rb") as target:
         elf_type, segments = elf_segments(target)
@@ -123,14 +128,14 @@ def run(args):
             raise ValueError("unsupported target fingerprint")
 
         if args.mods_dir is not None:
-            mods = discover_mods(args.mods_dir)
+            mods = select_packages(args.mods_dir, environment)
         else:
             mod = args.mod.resolve(strict=True)
             if not mod.is_file():
                 raise ValueError("mod must be a regular file")
-            mods = [mod]
+            mods = [SelectedMod(mod, "", 1)]
         for mod in mods:
-            validate_mod_path(mod)
+            validate_mod_path(mod.library)
         loader_path = args.loader.resolve(strict=True)
         with loader_path.open("rb") as loader:
             elf_type, segments = elf_segments(loader)
@@ -142,8 +147,8 @@ def run(args):
             # Always use a nonstandard descriptor, including for daemon launches
             # with one or more of stdin, stdout and stderr closed.
             fd = fcntl.fcntl(loader.fileno(), fcntl.F_DUPFD_CLOEXEC, 3)
-            with os.fdopen(fd, "rb") as inherited, mod_list(mods) as plan:
-                launch_target(target, executable, inherited, plan, args.server_args)
+            with os.fdopen(fd, "rb") as inherited, mod_list(environment, mods) as plan:
+                launch_target(target, executable, inherited, plan, args.target_args)
 
 
 def launch_target(target, executable, inherited, plan, arguments):
@@ -174,11 +179,11 @@ def main():
     parser.add_argument("--loader", required=True, type=Path, help="Innesto shared library")
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--mod", type=Path, help="one mod shared library")
-    source.add_argument("--mods-dir", type=Path, help="directory containing unpacked server mod packages")
-    parser.add_argument("server_args", nargs=argparse.REMAINDER, help="server arguments after --")
+    source.add_argument("--mods-dir", type=Path, help="directory containing unpacked mod packages")
+    parser.add_argument("target_args", nargs=argparse.REMAINDER, help="target arguments after --")
     args = parser.parse_args()
-    if args.server_args[:1] == ["--"]:
-        args.server_args = args.server_args[1:]
+    if args.target_args[:1] == ["--"]:
+        args.target_args = args.target_args[1:]
     try:
         run(args)
     except OSError as exc:

@@ -1,6 +1,6 @@
 # Build and load a mod package
 
-Innesto discovers native server mods in a directory you select with
+Innesto discovers native mods in a directory you select with
 `--mods-dir`. Each installed mod occupies one subdirectory containing
 `innesto.mod.json` and its library. The manifest gives the mod its identity,
 declares what it needs and points to the library that exports its entrypoint.
@@ -72,8 +72,8 @@ Here is the installed `observer/innesto.mod.json`.
 | `id` | Unique ID starting with a lowercase ASCII letter. The remaining characters may also include digits, underscores and hyphens. Dependencies refer to this ID regardless of the directory name. |
 | `version` | Three dot-separated decimal integers, such as `1.0.0`. Each component uses a single zero or starts with a nonzero digit. |
 | `game` | Exact game version, `"a1.2.10"`. |
-| `api` | Integer `1` selects the native initialization contract. |
-| `environment` | `"server"` for this dedicated-server target. |
+| `api` | Integer `1` selects the original C entrypoint. Integer `2` selects the [context entrypoint](environments.md#get-the-mod-context). |
+| `environment` | `"client"`, `"server"` or `"shared"` selects eligible [physical environments](environments.md). |
 | `entrypoint` | Relative path to a regular shared library inside the package. Paths may use subdirectories and must stay inside the package without any `..` components. The library must export its own [C initialization function](native-initialization.md#write-the-entrypoint). |
 | `depends` | Optional object mapping required mod IDs to `"*"` (any installed version) or an exact version such as `"1.0.0"`. |
 
@@ -85,16 +85,18 @@ have special meaning to glibc even inside an absolute library path.
 
 ## Initialization and errors
 
-The launcher validates all manifests and dependencies before it starts the
-server. Duplicate IDs, incompatible targets, unsatisfied dependencies and
-dependency cycles stop the launch. Correct the package named in the error
-and start again. Each library may appear only once in the selected set.
+The launcher checks manifest syntax, game/API compatibility, relative path
+syntax and unique IDs across the directory. It then selects packages for the
+profile’s physical environment. It resolves files, dependency versions and
+cycles only for the selected graph. An active dependency on a skipped
+package stops startup. Inactive packages may omit their library on disk.
+Each physical file may appear only once in the selected set.
 
 Innesto initializes dependencies first. When several mods are ready, it calls
-the one with the lexicographically smallest ID. Before calling the first
-`innesto_mod_init_v1`, it opens all selected libraries and resolves every
+the one with the lexicographically smallest ID. Before calling an
+initializer, it opens all selected libraries and resolves every
 entrypoint. Keep initialization in that function. Native library constructors
 can run as soon as the system linker opens a library.
 
 If an entrypoint returns nonzero, startup stops immediately. Earlier callbacks
-may already have run. All mods share the server process and its permissions.
+may already have run. All active mods share the host process and its permissions.

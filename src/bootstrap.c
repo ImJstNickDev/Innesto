@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 
+#include "runtime.h"
 #include "block_break_adapter.h"
 
 #include <dlfcn.h>
@@ -12,7 +13,12 @@
 
 struct mod {
     char *path;
-    int (*initialize)(void);
+    struct innesto_mod_context context;
+    int api;
+    union {
+        int (*v1)(void);
+        int (*v2)(const struct innesto_mod_context *);
+    } initialize;
     struct mod *next;
 };
 
@@ -40,6 +46,25 @@ static int inherited_fd(const char *name)
     }
     dprintf(STDERR_FILENO, "Innesto: missing or invalid file descriptor in %s\n", name);
     _Exit(EXIT_FAILURE);
+}
+
+/* EOF can end a plan only between complete records. */
+static char *plan_field(FILE *stream, int allow_eof)
+{
+    char *value = NULL;
+    size_t capacity = 0;
+    ssize_t length = getdelim(&value, &capacity, '\0', stream);
+    if (length < 0) {
+        free(value);
+        if (allow_eof && feof(stream) && !ferror(stream)) {
+            return NULL;
+        }
+        startup_error("incomplete mod plan");
+    }
+    if (value[length - 1] != '\0') {
+        startup_error("mod plan requires NUL-terminated fields");
+    }
+    return value;
 }
 
 static struct mod *consume_launch_context(void)
@@ -72,27 +97,56 @@ static struct mod *consume_launch_context(void)
     if (!paths) {
         startup_error("could not open mod list descriptor");
     }
+    char *format = plan_field(paths, 0);
+    if (strcmp(format, "Innesto/2") != 0) {
+        startup_error("unknown mod plan format");
+    }
+    free(format);
+    char *side = plan_field(paths, 0);
+    uint32_t environment;
+    if (strcmp(side, "server") == 0) {
+        environment = INNESTO_PHYSICAL_SERVER;
+    } else if (strcmp(side, "client") == 0) {
+        environment = INNESTO_PHYSICAL_CLIENT;
+    } else {
+        startup_error("invalid physical environment in mod plan");
+    }
+    free(side);
+
     struct mod *mods = NULL;
     struct mod **tail = &mods;
-    for (;;) {
-        char *path = NULL;
-        size_t capacity = 0;
-        ssize_t length = getdelim(&path, &capacity, '\0', paths);
-        if (length < 0) {
-            free(path);
-            if (ferror(paths) || !feof(paths)) {
-                startup_error("could not read mod list");
-            }
-            break;
-        }
-        if (path[0] != '/' || path[length - 1] != '\0') {
-            startup_error("mod list requires NUL-terminated absolute paths");
-        }
+    char *api;
+    while ((api = plan_field(paths, 1))) {
         struct mod *entry = calloc(1, sizeof *entry);
         if (!entry) {
             startup_error("could not allocate mod list");
         }
-        entry->path = path;
+        if (strcmp(api, "1") == 0) {
+            entry->api = 1;
+        } else if (strcmp(api, "2") == 0) {
+            entry->api = 2;
+        } else {
+            startup_error("invalid mod API in plan");
+        }
+        free(api);
+        entry->context.environment = environment;
+        char *id = plan_field(paths, 0);
+        if (*id) {
+            if (*id < 'a' || *id > 'z' ||
+                id[strspn(id, "abcdefghijklmnopqrstuvwxyz0123456789_-")] != '\0') {
+                startup_error("invalid mod ID in plan");
+            }
+            entry->context.id = id;
+        } else {
+            free(id);
+            if (entry->api != 1) {
+                startup_error("context entrypoint requires a packaged mod ID");
+            }
+        }
+        entry->path = plan_field(paths, 0);
+        if (entry->path[0] != '/') {
+            startup_error("mod plan requires absolute paths");
+        }
         *tail = entry;
         tail = &entry->next;
     }
@@ -111,9 +165,11 @@ static void resolve_entrypoint(struct mod *entry)
     }
 
     dlerror();
-    void *symbol = dlsym(mod, "innesto_mod_init_v1");
+    const char *name = entry->api == 1 ? "innesto_mod_init_v1" : "innesto_mod_init_v2";
+    void *symbol = dlsym(mod, name);
     if (dlerror() || !symbol) {
-        mod_error(entry->path, "mod entrypoint innesto_mod_init_v1 is missing");
+        dprintf(STDERR_FILENO, "Innesto: %s: mod entrypoint %s is missing\n", entry->path, name);
+        _Exit(EXIT_FAILURE);
     }
     // dlsym also searches dependencies and can return a data object.
     struct link_map *module_map;
@@ -123,11 +179,16 @@ static void resolve_entrypoint(struct mod *entry)
         !dladdr1(symbol, &info, &metadata, RTLD_DL_SYMENT) || !metadata ||
         strcmp(info.dli_fname, module_map->l_name) != 0 ||
         ELF64_ST_TYPE(((const ElfW(Sym) *)metadata)->st_info) != STT_FUNC) {
-        mod_error(entry->path, "mod must export innesto_mod_init_v1 as its own function");
+        mod_error(entry->path, "mod must export its selected entrypoint as its own function");
     }
 
-    _Static_assert(sizeof entry->initialize == sizeof symbol, "expected POSIX function pointers");
-    memcpy(&entry->initialize, &symbol, sizeof symbol);
+    _Static_assert(sizeof entry->initialize.v1 == sizeof symbol &&
+                   sizeof entry->initialize.v2 == sizeof symbol, "expected POSIX function pointers");
+    if (entry->api == 1) {
+        memcpy(&entry->initialize.v1, &symbol, sizeof symbol);
+    } else {
+        memcpy(&entry->initialize.v2, &symbol, sizeof symbol);
+    }
 }
 
 __attribute__((constructor)) static void initialize_mods(void)
@@ -140,23 +201,23 @@ __attribute__((constructor)) static void initialize_mods(void)
         return;
     }
 
-    struct mod *mods = consume_launch_context();
+    static struct mod *mods;  // Contexts passed to v2 mods live until process exit.
+    mods = consume_launch_context();
     innesto_block_break_seal_adapter();
+    innesto_seal_capabilities();
     for (struct mod *entry = mods; entry; entry = entry->next) {
         resolve_entrypoint(entry);
     }
     innesto_block_break_open_registration();
-    while (mods) {
-        int result = mods->initialize();
+    for (struct mod *entry = mods; entry; entry = entry->next) {
+        int result = entry->api == 1 ? entry->initialize.v1() :
+            innesto_initialize_v2(&entry->context, entry->initialize.v2);
         if (result != 0) {
             dprintf(STDERR_FILENO, "Innesto: %s: mod initialization failed (returned %d)\n",
-                    mods->path, result);
+                    entry->path, result);
             _Exit(EXIT_FAILURE);
         }
-        struct mod *next = mods->next;
-        free(mods->path);
-        free(mods);
-        mods = next;
     }
     innesto_block_break_finish_registration();
+    innesto_finish_startup();
 }

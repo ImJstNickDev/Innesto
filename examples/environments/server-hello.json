@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "server-hello",
+  "version": "1.0.0",
+  "game": "a1.2.10",
+  "api": 2,
+  "environment": "server",
+  "entrypoint": "server-hello.so",
+  "depends": {
+    "shared-hello": "1.0.0"
+  }
+}
