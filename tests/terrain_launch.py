@@ -177,6 +177,28 @@ int main(int argc, char **argv) {
         self.assertEqual(lock.read_bytes(), saved)
         self.assertEqual(stock_fingerprint(self.stock), stock_fingerprint(self.pack))
 
+    def test_solo_rejects_the_wrong_host_role_and_unmanaged_saves(self):
+        self.settings.update(environment="client", soloHostSha256=self.settings["sha256"])
+        shutil.copy2(self.host, self.host.with_name("owserver"))
+
+        def invoke(*flags):
+            cmd = self.command()[:-1] + ["--solo-world", self.world, *flags]
+            return subprocess.run(cmd, cwd=self.instance, text=True, capture_output=True,
+                                  env={**os.environ, "HOME": str(self.instance),
+                                       "XDG_CACHE_HOME": str(self.instance / "cache")})
+
+        self.assert_refused(invoke("--", "--play", "127.0.0.1:1"))
+        self.assertFalse(self.world.exists())
+        self.world.mkdir()
+        (self.world / "player").write_bytes(b"existing inventory")
+        refused = invoke("--preview-terrain")
+        self.assert_refused(refused)
+        self.assertIn("nonempty world", refused.stderr)
+        self.assertEqual(list(self.world.iterdir()), [self.world / "player"])
+        self.assertEqual((self.world / "player").read_bytes(), b"existing inventory")
+        self.settings["environment"] = "server"
+        self.assert_refused(invoke())
+
     def test_existing_world_accepts_equivalent_explicit_rock(self):
         args = ("--data-dir", str(self.world))
         self.assert_loaded(self.launch(*args))

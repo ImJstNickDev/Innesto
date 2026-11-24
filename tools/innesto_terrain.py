@@ -1,4 +1,4 @@
-"""Prepare a process-local terrain pack and protect the dedicated world's registry."""
+"""Prepare a process-local terrain pack and protect the selected world's registry."""
 from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 import fcntl
@@ -46,7 +46,7 @@ def copy_assets(source, destination, stock):
     shutil.copytree(source, destination, ignore=omit_pack, copy_function=shutil.copyfile)
 
 
-def run_supervised(action):
+def run_supervised(action, *, process_group=False):
     # The parent owns the temporary installation and registry lease through the game's exit.
     signals = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT)
     mask = signal.pthread_sigmask(signal.SIG_BLOCK, signals)
@@ -57,15 +57,26 @@ def run_supervised(action):
         raise
     if pid == 0:
         try:
+            if process_group:
+                os.setpgid(0, 0)
             signal.pthread_sigmask(signal.SIG_SETMASK, mask)
             action()
         except BaseException as exc:
             os.write(2, f"innesto-run: {exc}\n".encode(errors="replace"))
         os._exit(1)
+    if process_group:
+        try:
+            os.setpgid(pid, pid)
+        except (ProcessLookupError, PermissionError):
+            # The child can already have exec'd after setting its own group.
+            pass
     handlers = {}
     def forward(signum, frame):
         try:
-            os.kill(pid, signum)
+            if process_group:
+                os.killpg(pid, signum)
+            else:
+                os.kill(pid, signum)
         except ProcessLookupError:
             pass
     try:
@@ -86,25 +97,39 @@ def world_identity(profile, digest):
 
 
 def start(target, executable, digest, environment, mods, profile, arguments, launch, selected_peer=None,
-          *, migrate=False, preview=False, remaps=None, backup=None, packages=None):
+          *, migrate=False, preview=False, remaps=None, backup=None, packages=None, solo_world=None, loader_path=None):
     offline = migrate or preview
     materials = {m.id: m for mod in mods for m in mod.terrain}
-    if offline and (environment != "server" or len(arguments) != 2
+    solo = solo_world is not None
+    if solo and (environment != "client" or selected_peer is not None):
+        raise ValueError("--solo-world requires a physical client without a multiplayer peer")
+    if solo and offline and arguments:
+        raise ValueError("offline Solo operations take no native client arguments")
+    if not solo and offline and (environment != "server" or len(arguments) != 2
                     or arguments[0] != "--data-dir"):
         raise ValueError("offline terrain operations require -- --data-dir WORLD on a server")
     if selected_peer is not None and (environment != "client" or not materials):
         raise ValueError("--terrain-peer requires a client with shared terrain packages")
     world = None
+    if solo:
+        from adapters.a1_2_10 import solo_host, terrain_solo
+        world = solo_world.resolve()
+        host_digest = solo_host.verify_host(Path(executable), profile.get("soloHostSha256"))
+        registry_digest = terrain_solo.identity_digest(digest, host_digest)
+    else:
+        registry_digest = digest
     if environment == "server":
         world = routing.world_for_launch(arguments, bool(materials), REGISTRY)
-        if not materials and routing.protected(world, REGISTRY):
-            if "terrainPackSha256" in profile and "terrainBaseCount" in profile:
-                identity = world_identity(profile, digest)
-                with directory_lock(world) as lease:
-                    Registry(lease, identity).bind({}, remaps, migrate=offline)
-            raise ValueError("terrain packages missing for this world; restore the recorded packages or use "
-                             "--preview-terrain with the pinned terrain server profile and replacement packages")
+    if world is not None and not materials and routing.protected(world, REGISTRY):
+        if "terrainPackSha256" in profile and "terrainBaseCount" in profile:
+            identity = world_identity(profile, registry_digest)
+            with directory_lock(world) as lease:
+                Registry(lease, identity).bind({}, remaps, migrate=offline)
+        raise ValueError("terrain packages missing for this world; restore the recorded packages or use "
+                         "--preview-terrain with the pinned terrain server profile and replacement packages")
     if not materials:
+        if solo:
+            raise ValueError("--solo-world requires shared terrain packages")
         if offline:
             raise ValueError("offline terrain operations require an existing managed world with terrain packages")
         if "terrainPackSha256" in profile or "terrainBaseCount" in profile:
@@ -133,6 +158,8 @@ def start(target, executable, digest, environment, mods, profile, arguments, lau
     source_assets = Path(executable).resolve().parent / "assets"
     if cache.resolve().is_relative_to(source_assets.resolve()):
         raise ValueError("terrain runtime cache must be outside the game assets")
+    if solo:
+        game_dir = terrain_solo.game_directory(world, arguments, inputs=(cache, source_assets.parent, packages, loader_path, backup))
     if world is not None:
         if cache.resolve().is_relative_to(world):
             raise ValueError("terrain runtime cache must be outside the world")
@@ -152,8 +179,10 @@ def start(target, executable, digest, environment, mods, profile, arguments, lau
             peer = routing.peer_address(arguments, profile.get("terrainDashboardPort"), selected_peer)
             bindings = peer_bindings(*peer, available, base_count)
         else:
-            registry = Registry(lease, world_identity(profile, digest))
+            registry = Registry(lease, world_identity(profile, registry_digest))
             bindings = registry.bind(available, remaps, migrate=offline)
+            if solo:
+                terrain_solo.validate_world(lease, world)
         ordered = [replace(materials[provider], id=mid) for mid, provider in bindings.items()]
         with tempfile.TemporaryDirectory(dir=cache, prefix="run-") as temporary:
             runtime = Path(temporary)
@@ -186,7 +215,7 @@ def start(target, executable, digest, environment, mods, profile, arguments, lau
             wire = {} if world is None else None
             candidates = terrain.stage_materials(stock, generated, ordered, baseline,
                                                  providers=bindings, wire_receipts=wire)
-            if world is None:
+            if environment == "client":
                 stage_display_names(runtime / "assets", ordered)
             image = runtime / Path(executable).name
             target.seek(0)
@@ -200,7 +229,18 @@ def start(target, executable, digest, environment, mods, profile, arguments, lau
                     verify_peer(*peer, wire, base_count, initial_order=list(bindings))
                     return run_supervised(lambda: launch(staged, str(image), arguments))
                 check_world_path(world, lease)
-                registry.commit(registry.plan(candidates, bindings=bindings))
+                plan = registry.plan(candidates, bindings=bindings)
+                if solo:
+                    with solo_host.stage_solo_host(runtime, Path(executable), host_digest, world, lease):
+                        registry.commit(plan)
+                        terrain_solo.prepare_world(lease, world)
+
+                        def exec_solo(fd, argv, env):
+                            terrain_solo.exec_in_view(world, lease, game_dir, runtime, fd, argv[0], argv[1:], env)
+
+                        return run_supervised(lambda: launch(staged, str(image), arguments, lease, exec_target=exec_solo),
+                                              process_group=True)
+                registry.commit(plan)
                 arguments = routing.bind_world(arguments, world)
 
                 def launch_world():

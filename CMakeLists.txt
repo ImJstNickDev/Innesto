@@ -89,6 +89,8 @@ if(BUILD_TESTING)
     add_test(NAME terrain-frames COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/test_terrain_frames.py")
     add_test(NAME terrain-names COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/test_terrain_names.py")
     add_test(NAME terrain-pack COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/test_terrain_adapter.py")
+    add_test(NAME terrain-solo COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/test_terrain_solo.py")
+    add_test(NAME solo-host COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/test_solo_host.py")
     add_test(NAME terrain-peer COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/test_terrain_peer.py")
     add_test(NAME terrain-launch COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/terrain_launch.py"
         "$<TARGET_FILE_DIR:innesto-bootstrap>")
