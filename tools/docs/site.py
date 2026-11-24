@@ -93,16 +93,24 @@ def on_config(config):
     if not branches:
         raise ValueError("No game branches found. Fetch the game/* branches from origin.")
 
-    navigation = []
-    for version, commit in sorted(branches.items()):
+    versions = sorted(branches)
+    navigation = [{"All versions": "versions/index.md"}]
+    for version in versions:
         dest = docs / "versions" / version
-        copy_docs("docs/version", commit, dest)
+        copy_docs("docs/version", branches[version], dest)
         if not (dest / "index.md").is_file():
             raise ValueError(f"Missing docs/version/index.md for game/{version}")
         pages = sorted(dest.rglob("*.md"))
         pages.remove(dest / "index.md")
         pages.insert(0, dest / "index.md")
         navigation.append({version: [p.relative_to(docs).as_posix() for p in pages]})
+
+    catalog = [
+        "# Game versions", "",
+        "Choose your Openworld version for platform support, build instructions and mod examples.",
+        "", *(f"- [Openworld {version}]({version}/index.md)" for version in versions),
+    ]
+    (docs / "versions/index.md").write_text("\n".join(catalog) + "\n", encoding="utf-8")
 
     if config.nav is not None:
         config.nav = [*config.nav, {"Versions": navigation}]

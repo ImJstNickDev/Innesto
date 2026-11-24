@@ -32,14 +32,18 @@ git switch -c docs/api-guide origin/main
 Use a descriptive prefix such as `feat/`, `fix/` or `docs/`. Keep game-specific
 examples and reference documentation alongside the implementation on its
 version branch. Write version-specific pages in `docs/version/`, with `index.md`
-as their starting page. The site publishes them at `versions/<version>/`. When
+as their starting page. When you create a `game/<version>` branch with that
+index, the next site build adds it to the [version catalog](versions/index.md)
+and publishes its guide at `versions/<version>/`. When
 working on a feature branch for a game version, preview its local pages with
 `python tools/docs/site.py serve --game a1.2.10` in the documentation environment.
 
 `main` owns the shared README, branding, contributor guides and documentation
 tooling. To change one of those files, target `main`. After a merge, the sync
 workflow checks active game branches and prepares pull requests for shared
-changes. Version-specific code and guides stay on the game branch.
+changes. Version-specific code and guides stay on the game branch. If GitHub
+puts a workflow run for an Actions-created sync PR on hold, review its diff,
+approve the run and wait for the required checks to pass before merging.
 
 A game branch PR must pass the shared-file check. To recover a stale branch,
 fetch the latest refs and run `python3 tools/docs/sync_shared.py pr --game game/a1.2.10`

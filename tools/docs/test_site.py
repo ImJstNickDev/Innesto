@@ -1,6 +1,7 @@
 """Exercise the assembled site against independent main and game histories."""
 
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -63,7 +64,11 @@ class SiteTests(unittest.TestCase):
         self.write("docs/assets/brand.txt", "worktree mark")
         self.build()
         self.assertEqual((self.root / "site/assets/brand.txt").read_text(), "worktree mark")
+        catalog = (self.root / "site/versions/index.html").read_text()
+        links = re.findall(r'<a href="([^"]+)">Openworld ([^<]+)</a>', catalog)
+        self.assertEqual(links, [("one/", "one"), ("two/", "two")])
         for version in ("one", "two"):
+            self.assertTrue((self.root / f"site/versions/{version}/index.html").is_file())
             page = self.root / f"site/versions/{version}/startup/index.html"
             self.assertIn("Shipped guide", page.read_text())
 
