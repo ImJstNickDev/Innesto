@@ -14,7 +14,7 @@ Innesto is an independent mod loader and API project for Openworld. This develop
 dedicated server process.
 
 **Target: Openworld a1.2.10 on Linux x86-64.** Follow the
-[native initialization guide](docs/native-initialization.md) to build the loader
+[native initialization guide](docs/version/native-initialization.md) to build the loader
 and an independent example, run the fixture tests and launch a private target.
 
 ## Work on the documentation
