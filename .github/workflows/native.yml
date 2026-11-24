@@ -1,0 +1,24 @@
+name: Native initialization
+
+on:
+  pull_request:
+    branches: ['game/a1.2.10']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: Check native initialization
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Configure
+        run: cmake -S . -B build/native -DCMAKE_C_FLAGS="-Wall -Wextra -Werror -pedantic"
+      - name: Build
+        run: cmake --build build/native --parallel
+      - name: Exercise the example and target checks
+        run: ctest --test-dir build/native --output-on-failure
