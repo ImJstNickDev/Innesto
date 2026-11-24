@@ -47,6 +47,38 @@ An empty package directory starts the server with zero mods. The
 [single-library command](native-initialization.md#start-a-private-target)
 remains available for testing an individual build.
 
+## Check a dedicated server restart
+
+Start with the `hello` and `observer` installation above. Build the
+[environment examples](environments.md) and install them into the same
+package directory.
+
+```sh
+cmake -S examples/environments -B build/environments -DINNESTO_INCLUDE_DIR="$PWD/include"
+cmake --build build/environments
+cmake --install build/environments --prefix "$PWD/build/packages"
+```
+
+Use a private copy of a stopped world and the same server profile and data
+directory for each launch. Expect the following markers on the dedicated server.
+
+| Phase | Packages, in order |
+| --- | --- |
+| API 1 initialization | `hello`, `observer` |
+| API 2 initialization | `shared-hello`, `server-hello` |
+| API 2 startup completion | `shared-hello`, `server-hello` |
+
+All six markers carry the server PID and precede readiness. The installed
+`client-hello` package emits zero markers. Stop the server normally, move
+`observer` outside the package directory, and restart. Five markers should
+appear. An empty package directory produces zero. Restoring the original
+packages and restarting restores all six markers.
+
+These steps passed on the distributed a1.2.10 Linux x86-64 dedicated
+server. Requiring the unavailable [block-break event](before-block-break.md)
+stopped the launch before the server listened. Removing that requirement
+allowed startup packages to open the same saved world again.
+
 ## Write a manifest
 
 Here is the installed `observer/innesto.mod.json`.
