@@ -1,6 +1,6 @@
 # Terrain materials
 
-A shared native package can register terrain materials on a dedicated server and the clients that join it. Each material has a stable ID, an original texture and a family that the game uses for rendering and gameplay. The two examples in this guide can be collected and placed in Survival.
+A shared native package can register terrain materials on a dedicated server and the clients that join it. Each material has a stable ID, an original texture and a family that the game uses for rendering and gameplay. The two examples can be collected and placed in Survival. [Try the player walkthrough](terrain-survival.md).
 
 ## Package a texture
 
